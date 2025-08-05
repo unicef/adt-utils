@@ -89,11 +89,65 @@ python clean_json_texts.py --dir ./output/content/i18n/
 - **Background boxes**: Standardized to `bg-green-50`, `bg-amber-50`, `bg-purple-50`
 
 ### Layout Intelligence (`standardize_image_text_layouts.py`)
-Based on text-to-image ratio analysis:
-- **< 100 ratio**: Image top, text bottom
-- **100-500 ratio**: Image left, text right  
-- **500-1000 ratio**: Text left, image right
-- **> 1000 ratio**: Text top, image bottom
+
+The layout engine automatically analyzes content and applies intelligent responsive layouts based on text-to-image ratios:
+
+#### Layout Strategy Matrix
+
+| Text-to-Image Ratio | Layout Strategy | Description | Use Case |
+|---------------------|----------------|-------------|----------|
+| **< 100** | Image Top, Text Bottom | Minimal text, image-focused | Infographics, diagrams |
+| **100-500** | Image Left, Text Right | Balanced content | Tutorials, explanations |
+| **500-1000** | Text Left, Image Right | Text-heavy with supporting image | Articles, detailed content |
+| **> 1000** | Text Top, Image Bottom | Text-dominant content | Documentation, essays |
+
+#### Technical Implementation
+
+**Content Analysis Process:**
+1. **Text Extraction**: Counts characters in all text elements (excluding alt text)
+2. **Image Detection**: Identifies `<img>` tags and calculates count
+3. **Ratio Calculation**: `text_char_count / image_count`
+4. **Layout Application**: Applies corresponding Tailwind CSS classes
+
+**Generated CSS Classes:**
+```html
+<!-- Image Top (ratio < 100) -->
+<div class="flex flex-col space-y-4">
+  <div class="flex justify-center"><!-- images --></div>
+  <div><!-- text content --></div>
+</div>
+
+<!-- Image Left (100-500) -->
+<div class="flex flex-col lg:flex-row lg:space-x-6 space-y-4 lg:space-y-0">
+  <div class="lg:w-1/2"><!-- images --></div>
+  <div class="lg:w-1/2"><!-- text --></div>
+</div>
+
+<!-- Text Left (500-1000) -->
+<div class="flex flex-col lg:flex-row lg:space-x-6 space-y-4 lg:space-y-0">
+  <div class="lg:w-2/3"><!-- text --></div>
+  <div class="lg:w-1/3"><!-- images --></div>
+</div>
+
+<!-- Text Top (ratio > 1000) -->
+<div class="flex flex-col space-y-4">
+  <div><!-- text content --></div>
+  <div class="flex justify-center"><!-- images --></div>
+</div>
+```
+
+#### Responsive Behavior
+- **Mobile**: All layouts stack vertically (`flex-col`)
+- **Desktop**: Applies side-by-side layouts (`lg:flex-row`)
+- **Tablet**: Inherits mobile behavior for consistency
+
+#### Smart Features
+- **Automatic Detection**: No manual configuration needed
+- **Content Preservation**: All `data-id` attributes maintained
+- **Accessibility**: Proper semantic structure preserved
+- **Fallback Handling**: Defaults to text-top layout if analysis fails
+
+For detailed examples and edge cases, see [`IMAGE_TEXT_LAYOUTS.md`](IMAGE_TEXT_LAYOUTS.md).
 
 ### Text Structure (`restructure_text_simple.py`)
 - Wraps text in `<span>` tags with `data-id` attributes

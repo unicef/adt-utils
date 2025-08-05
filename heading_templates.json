@@ -1,0 +1,94 @@
+{
+    "heading_templates": {
+        "h1": {
+            "classes": "text-5xl font-bold mb-4",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        },
+        "h2": {
+            "classes": "text-2xl font-bold mb-4",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        },
+        "h3": {
+            "classes": "text-xl font-bold mb-3",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        },
+        "h4": {
+            "classes": "text-lg font-bold mb-2",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        },
+        "h5": {
+            "classes": "text-base font-bold mb-2",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        },
+        "h6": {
+            "classes": "text-sm font-bold mb-1",
+            "color_options": [" text-amber-700", "text-red-600", "text-purple-500"]
+        }
+    },
+    "background_templates": {
+        "box_backgrounds": ["bg-green-50", "bg-amber-50", "bg-purple-50"],
+        "patterns": [
+            "bg-\\w+-\\d+\\s+p-\\d+\\s+rounded",
+            "bg-\\w+-\\d+.*?p-\\d+.*?rounded",
+            "bg-\\w+-\\d+.*?rounded.*?p-\\d+"
+        ]
+    },
+    "color_mapping": {
+        "red": "text-red-600",
+        "pink": " text-amber-700",
+        "rose": " text-amber-700",
+        "blue": " text-amber-700",
+        "teal": " text-amber-700",
+        "cyan": " text-amber-700",
+        "green": " text-amber-700",
+        "emerald": " text-amber-700",
+        "purple": "text-purple-500",
+        "violet": "text-purple-500",
+        "indigo": "text-purple-500",
+        "gray": " text-amber-700",
+        "slate": " text-amber-700",
+        "zinc": " text-amber-700",
+        "neutral": " text-amber-700",
+        "stone": " text-amber-700",
+        "orange": " text-amber-700",
+        "amber": " text-amber-700",
+        "yellow": " text-amber-700",
+        "lime": " text-amber-700",
+        "sky": " text-amber-700",
+        "black": " text-amber-700",
+        "white": " text-amber-700"
+    },
+    "background_color_mapping": {
+        "red": "bg-amber-50",
+        "pink": "bg-amber-50",
+        "rose": "bg-amber-50",
+        "blue": "bg-green-50",
+        "teal": "bg-green-50",
+        "cyan": "bg-green-50",
+        "green": "bg-green-50",
+        "emerald": "bg-green-50",
+        "purple": "bg-amber-50",
+        "violet": "bg-purple-50",
+        "indigo": "bg-purple-50",
+        "gray": "bg-purple-50",
+        "slate": "bg-purple-50",
+        "zinc": "bg-purple-50",
+        "neutral": "bg-amber-50",
+        "stone": "bg-amber-50",
+        "orange": "bg-amber-50",
+        "amber": "bg-amber-50",
+        "yellow": "bg-amber-50",
+        "lime": "bg-green-50",
+        "sky": "bg-green-50",
+        "black": "bg-green-50",
+        "white": "bg-green-50"
+    },
+    "preserve_attributes": [
+        "data-id",
+        "data-aria-id", 
+        "aria-label",
+        "tabindex",
+        "id",
+        "role"
+    ]
+}

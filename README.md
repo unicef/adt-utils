@@ -36,7 +36,12 @@ adt-utils/
 ├── clean_json_texts.py              # JSON cleanup utility
 ├── test_single_layout.py           # Test layout on single file
 ├── restore_template.py             # Restore original structure
+├── config.py                       # Configuration and path management
 ├── heading_templates.json          # Heading style configurations
+├── Dockerfile                      # Docker container definition
+├── docker-compose.yml              # Docker Compose configuration
+├── Makefile                        # Make commands for Docker operations
+├── .gitignore                      # Git ignore rules
 ├── IMAGE_TEXT_LAYOUTS.md           # Layout strategy documentation
 └── README.md                       # This file
 ```
@@ -200,24 +205,80 @@ python clean_json_texts.py --file ./output/content/i18n/es/texts.json
 python clean_json_texts.py --dir ./output/ --pattern "*.json"
 ```
 
+## 🐳 Docker Usage
+
+### Quick Start with Docker
+```bash
+# Build the image
+make build
+
+# Run complete standardization
+make run-all START=6 END=58
+
+# Run with custom target folder
+make run-all TARGET_DIR=../my-project START=10 END=20
+```
+
+### Docker Compose
+```bash
+# Edit docker-compose.yml to set your target folder, then:
+docker-compose run adt-utils python standardize_all.py 6 58
+
+# Run specific scripts
+docker-compose run adt-utils python clean_json_texts.py --dir /workspace/target-folder/content/i18n/
+```
+
+### Manual Docker Commands
+```bash
+# Build image
+docker build -t adt-utils .
+
+# Run standardization (replace 'target-folder' with your folder name)
+docker run --rm -v "$(pwd)/../:/workspace" \
+  -e ADT_OUTPUT_DIR=/workspace/target-folder \
+  adt-utils python standardize_all.py 6 58
+
+# Clean JSON files in external folder
+docker run --rm -v "$(pwd)/../:/workspace" \
+  adt-utils python clean_json_texts.py --dir /workspace/target-folder/content/i18n/
+```
+
+### Available Make Commands
+```bash
+make help                        # Show all available commands
+make run-demo                    # Run demo on pages 6-10
+make clean-json                  # Clean JSON files
+make test-layout FILE=path.html  # Test single file
+make shell                       # Open container shell for debugging
+```
+
 ## 🧪 Testing & Validation
 
 ### Demo Mode
 ```bash
-# Run demo on small file range
+# Local
 python demo_standardization.py 6 10
+
+# Docker
+make run-demo
 ```
 
 ### Single File Testing
 ```bash
-# Test layout changes on specific file
+# Local
 python test_single_layout.py path/to/file.html
+
+# Docker
+make test-layout FILE=target-folder/file.html
 ```
 
 ### Restore Templates
 ```bash
-# Restore original template structure if needed
+# Local
 python restore_template.py
+
+# Docker
+docker-compose run adt-utils python restore_template.py
 ```
 
 ## 📋 Output

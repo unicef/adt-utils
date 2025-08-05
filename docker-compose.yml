@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  adt-utils:
+    build: .
+    volumes:
+      # Mount the parent directory to access sibling folders
+      - ../:/workspace
+    working_dir: /app
+    environment:
+      # Set default paths - modify these for your target folder
+      - DOCKER_ENV=true
+      - ADT_OUTPUT_DIR=/workspace/target-folder
+      - ADT_JSON_DIR=/workspace/target-folder/content/i18n/
+      - ADT_CONFIG_FILE=/app/heading_templates.json
+    # Override this command when running
+    command: python standardize_all.py --help
+
+  # Service for running individual scripts
+  adt-script:
+    build: .
+    volumes:
+      - ../:/workspace
+    working_dir: /app
+    environment:
+      - DOCKER_ENV=true
+      - ADT_OUTPUT_DIR=/workspace/target-folder
+      - ADT_JSON_DIR=/workspace/target-folder/content/i18n/
+      - ADT_CONFIG_FILE=/app/heading_templates.json
+    # This service is meant to be used with docker-compose run
+    profiles: ["manual"]

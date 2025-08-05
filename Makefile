@@ -38,19 +38,19 @@ clean-json: build
 # Validate HTML files for data-id attributes
 validate: build
 	@echo "Validating HTML files in $(TARGET_DIR)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
+	-docker run --rm -v "$(PARENT_DIR):/workspace" \
 		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
 
 # Validate with verbose output
 validate-verbose: build
 	@echo "Validating HTML files in $(TARGET_DIR) (verbose)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
+	-docker run --rm -v "$(PARENT_DIR):/workspace" \
 		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR)) --verbose
 
 # Validate and save detailed report
 validate-report: build
 	@echo "Validating HTML files and saving report..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
+	-docker run --rm -v "$(PARENT_DIR):/workspace" \
 		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR)) --output /workspace/validation_report.txt
 	@echo "Report saved to ../validation_report.txt"
 

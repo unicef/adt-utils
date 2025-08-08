@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Span Structure</title>
+</head>
+<body>
+    <!-- This is the structure you're using -->
+    <h1 class="text-5xl font-bold mb-4 text-pink-500" id="section-heading">
+        💆‍♂️ 📆 <span data-id="text-13-1">Mitos sobre el autocuidado</span>
+    </h1>
+    
+    <!-- Another variation -->
+    <h1 class="text-5xl font-bold mb-4 text-pink-500">
+        🚀💼 <span data-id="text-13-2">Importancia y beneficios del autocuidado</span>
+    </h1>
+    
+    <!-- This should be flagged (no data-id anywhere) -->
+    <h1 class="text-5xl font-bold mb-4 text-pink-500">
+        💆‍♂️ 📆 Mitos sobre el autocuidado (no span)
+    </h1>
+    
+    <!-- This should also be flagged (span has no data-id) -->
+    <h1 class="text-5xl font-bold mb-4 text-pink-500">
+        💆‍♂️ 📆 <span>Mitos sobre el autocuidado</span>
+    </h1>
+</body>
+</html>

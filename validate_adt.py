@@ -14,22 +14,15 @@ Usage:
 """
 
 import argparse
-import os
-import sys
 import re
 from pathlib import Path
-from bs4 import BeautifulSoup, NavigableString
-import glob
+from bs4 import BeautifulSoup, NavigableString, Comment
 
 
-class ADTValidator:
-    def __init__(self, verbose=False):
-        self.verbose = verbose
-        self.total_files = 0
-        self.valid_files = 0
-        self.total_violations = 0
-        self.validation_results = []
-        
+class ADTValidationMixin:
+    """Mixin class containing common validation logic that can be imported by other scripts"""
+    
+    def __init__(self):
         # Elements that typically don't need data-id (can be configured)
         self.exempt_tags = {
             'script', 'style', 'meta', 'title', 'head',
@@ -98,58 +91,100 @@ class ADTValidator:
         # Check if text starts with emoji
         match = emoji_pattern.match(text_clean)
         return match is not None
-    
+
     def has_meaningful_text(self, element):
-        """Check if element has meaningful text content (not whitespace)"""
+        """Check if element has meaningful DIRECT text content (not from children)"""
         if not element.get_text():
             return False
         
-        # Get direct text content (not from children)
+        # Get ONLY direct text content (not from children), excluding comments
         direct_text = ""
         for content in element.contents:
-            if isinstance(content, NavigableString):
+            if isinstance(content, NavigableString) and not isinstance(content, Comment):
                 direct_text += str(content)
         
-        # Check if there's meaningful text (not just whitespace)
-        return direct_text.strip() != ""
+        # Check if there's meaningful direct text (not just whitespace)
+        direct_text = direct_text.strip()
+        if not direct_text:
+            return False
+        
+        # Skip emoji-only content
+        if self.is_emoji_only(direct_text):
+            return False
+        
+        # Skip content that starts with emoji
+        if self.starts_with_emoji(direct_text):
+            return False
+        
+        return True
+    
+    def should_validate_element(self, element):
+        """Check if element should be validated for data-id requirement"""
+        # Skip exempt tags
+        if element.name in self.exempt_tags:
+            return False
+        
+        # Skip if already has data-id
+        if element.get('data-id'):
+            return False
+        
+        # Only validate if has meaningful direct text
+        return self.has_meaningful_text(element)
+
+
+class ADTValidator(ADTValidationMixin):
+    def __init__(self, verbose=False):
+        self.verbose = verbose
+        self.total_files = 0
+        self.valid_files = 0
+        self.total_violations = 0
+        self.validation_results = []
+        
+        # Initialize common validation logic
+        self._init_validation_config()
+    
+    def _init_validation_config(self):
+        """Initialize common validation configuration"""
+        # Elements that typically don't need data-id (can be configured)
+        self.exempt_tags = {
+            'script', 'style', 'meta', 'title', 'head',
+            'html', 'body', 'br', 'hr'
+        }
     
     def validate_element(self, element, file_path):
         """Validate a single element for data-id requirement"""
         violations = []
         
-        # Skip exempt tags
-        if element.name in self.exempt_tags:
+        # Use the shared validation logic
+        if not self.should_validate_element(element):
             return violations
         
-        # Check if element has meaningful text
-        if self.has_meaningful_text(element):
-            # Skip emoji-only elements or elements that start with emojis
-            element_text = element.get_text().strip()
-            if (self.is_emoji_only(element_text) or
-                    self.starts_with_emoji(element_text)):
-                return violations
-                
-            data_id = element.get('data-id')
+        # Element needs data-id but doesn't have one
+        data_id = element.get('data-id')
+        if not data_id or data_id.strip() == "":
+            # Get direct text for reporting (excluding comments)
+            direct_text = ""
+            for content in element.contents:
+                if isinstance(content, NavigableString) and not isinstance(content, Comment):
+                    direct_text += str(content)
+            direct_text = direct_text.strip()
             
-            # Check if data-id is missing or empty
-            if not data_id or data_id.strip() == "":
-                text_content = element.get_text()
-                if len(text_content) > 100:
-                    text_display = text_content[:100] + "..."
-                else:
-                    text_display = text_content
-                    
-                violation = {
-                    'file': file_path,
-                    'tag': element.name,
-                    'text': text_display,
-                    'line': getattr(element, 'sourceline', 'unknown'),
-                    'classes': element.get('class', []),
-                    'id': element.get('id', ''),
-                    'has_data_id': bool(data_id),
-                    'data_id_value': data_id
-                }
-                violations.append(violation)
+            if len(direct_text) > 100:
+                text_display = direct_text[:100] + "..."
+            else:
+                text_display = direct_text
+                
+            violation = {
+                'file': file_path,
+                'tag': element.name,
+                'text': text_display,
+                'line': getattr(element, 'sourceline', 'unknown'),
+                'classes': element.get('class', []),
+                'id': element.get('id', ''),
+                'has_data_id': bool(data_id),
+                'data_id_value': data_id
+            }
+            violations.append(violation)
         
         return violations
     

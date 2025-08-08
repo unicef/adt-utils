@@ -19,11 +19,17 @@ import json
 import os
 import re
 from pathlib import Path
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, Comment
+
+# Import shared validation logic
+from validate_adt import ADTValidationMixin
 
 
-class DataIDFixer:
+class DataIDFixer(ADTValidationMixin):
     def __init__(self, target_dir, dry_run=False, verbose=False):
+        # Initialize the validation mixin
+        super().__init__()
+        
         self.target_dir = Path(target_dir)
         self.dry_run = dry_run
         self.verbose = verbose
@@ -38,18 +44,14 @@ class DataIDFixer:
             'json_files_updated': set()
         }
         
-        # Elements that typically don't need data-id
-        self.exempt_tags = {
-            'script', 'style', 'meta', 'title', 'head', 
-            'html', 'body', 'br', 'hr', 'link'
-        }
-        
         # Cache for JSON files
         self.json_cache = {}
         self.json_reverse_cache = {}  # text -> key mapping
     
     def extract_page_id_from_filename(self, filename):
-        """Extract page ID from HTML filename (e.g., '25_0_adt.html' -> '25')"""
+        """Extract page ID from HTML filename (e.g., '25_0_adt.html' -> '25', 'index.html' -> '0')"""
+        if filename == "index.html":
+            return "0"
         match = re.match(r'(\d+)_.*\.html$', filename)
         return match.group(1) if match else None
     
@@ -71,10 +73,10 @@ class DataIDFixer:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Create reverse mapping (text -> key)
+            # Create reverse mapping (text -> key) - only for keys starting with "text-"
             reverse_map = {}
             for key, value in data.items():
-                if isinstance(value, str):
+                if isinstance(value, str) and key.startswith("text-"):
                     # Normalize text for comparison
                     normalized_text = self.normalize_text(value)
                     reverse_map[normalized_text] = key
@@ -115,7 +117,7 @@ class DataIDFixer:
         data = self.json_cache[lang_code]
         pattern = f"text-{page_id}-"
         
-        # Find existing incremental values for this page
+        # Find existing incremental values for this page - only for keys starting with "text-"
         existing_nums = []
         for key in data.keys():
             if key.startswith(pattern):
@@ -172,39 +174,21 @@ class DataIDFixer:
             except Exception as e:
                 print(f"  ❌ Error saving {json_path}: {e}")
     
-    def has_meaningful_text(self, element):
-        """Check if element has meaningful text content (not just whitespace)"""
-        if not element or not hasattr(element, 'get_text'):
-            return False
-        
-        # Get direct text content (not from children)
+    def get_element_text(self, element):
+        """Get the DIRECT text content of an element (not from children), excluding comments"""
         direct_text = ""
         for content in element.contents:
-            if isinstance(content, NavigableString):
+            if isinstance(content, NavigableString) and not isinstance(content, Comment):
                 direct_text += str(content)
-        
-        # Check if there's meaningful text (not just whitespace)
-        return direct_text.strip() != ""
-    
-    def get_element_text(self, element):
-        """Get the text content of an element"""
-        return self.normalize_text(element.get_text())
+        return self.normalize_text(direct_text)
     
     def fix_element_data_id(self, element, lang_code, page_id):
-        """Fix missing data-id for a single element"""
-        # Skip exempt tags
-        if element.name in self.exempt_tags:
+        """Fix missing data-id for a single element using shared validation logic"""
+        # Use the shared validation logic from ADTValidationMixin
+        if not self.should_validate_element(element):
             return False
         
-        # Skip if already has data-id
-        if element.get('data-id'):
-            return False
-        
-        # Skip if no meaningful text
-        if not self.has_meaningful_text(element):
-            return False
-        
-        # Get element text
+        # Get element text (direct text only)
         text = self.get_element_text(element)
         if not text:
             return False

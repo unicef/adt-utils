@@ -7,7 +7,7 @@ END ?= 58
 CURRENT_DIR := $(CURDIR)
 PARENT_DIR := $(dir $(CURRENT_DIR:/=))
 
-.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report help shell debug
+.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report fix-data-ids validate-fix help shell debug
 
 # Build the Docker image
 build:
@@ -53,6 +53,22 @@ validate-report: build
 	-docker run --rm -v "$(PARENT_DIR):/workspace" \
 		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR)) --output /workspace/validation_report.txt
 	@echo "Report saved to ../validation_report.txt"
+
+# Fix missing data-id attributes
+fix-data-ids: build
+	@echo "Fixing missing data-id attributes..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python fix_missing_data_ids.py /workspace/$(notdir $(TARGET_DIR))
+
+# Complete validation and fix workflow
+validate-fix: build
+	@echo "Running validation and fix workflow..."
+	-docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python fix_missing_data_ids.py /workspace/$(notdir $(TARGET_DIR))
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
 
 # Test single layout
 test-layout: build
@@ -114,6 +130,8 @@ help:
 	@echo "  make validate                 - Validate HTML files for data-id attributes"
 	@echo "  make validate-verbose         - Validate with detailed violation output"
 	@echo "  make validate-report          - Validate and save report to ../validation_report.txt"
+	@echo "  make fix-data-ids             - Fix missing data-id attributes automatically"
+	@echo "  make validate-fix             - Complete workflow: validate → fix → validate"
 	@echo ""
 	@echo "Individual Scripts:"
 	@echo "  make run-html START=6 END=58 - HTML structure only"
@@ -135,4 +153,6 @@ help:
 	@echo "  make run-all TARGET_DIR=../my-project START=10 END=20"
 	@echo "  make validate TARGET_DIR=../my-project"
 	@echo "  make validate-verbose TARGET_DIR=../my-project"
+	@echo "  make fix-data-ids TARGET_DIR=../my-project"
+	@echo "  make validate-fix TARGET_DIR=../my-project"
 	@echo "  make test-layout FILE=my-project/25_0_adt.html"

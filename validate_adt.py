@@ -16,6 +16,7 @@ Usage:
 import argparse
 import os
 import sys
+import re
 from pathlib import Path
 from bs4 import BeautifulSoup, NavigableString
 import glob
@@ -31,12 +32,75 @@ class ADTValidator:
         
         # Elements that typically don't need data-id (can be configured)
         self.exempt_tags = {
-            'script', 'style', 'meta', 'title', 'head', 
+            'script', 'style', 'meta', 'title', 'head',
             'html', 'body', 'br', 'hr'
         }
     
+    def is_emoji_only(self, text):
+        """Check if text contains only emojis and whitespace"""
+        if not text:
+            return False
+        
+        # Remove whitespace
+        text_clean = text.strip()
+        if not text_clean:
+            return False
+        
+        # Comprehensive emoji pattern including variation selectors
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U00002700-\U000027BF"  # dingbats
+            "\U0001F900-\U0001F9FF"  # supplemental symbols
+            "\U00002600-\U000026FF"  # miscellaneous symbols
+            "\U0001F000-\U0001F02F"  # mahjong tiles
+            "\U0001F0A0-\U0001F0FF"  # playing cards
+            "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-A
+            "\U0000FE00-\U0000FE0F"  # variation selectors
+            "\U0000200D"             # zero width joiner
+            "]+", re.UNICODE)
+        
+        # Remove all emojis and see if anything is left
+        text_no_emoji = emoji_pattern.sub('', text_clean)
+        
+        # If nothing is left after removing emojis, it was emoji-only
+        return text_no_emoji.strip() == ""
+    
+    def starts_with_emoji(self, text):
+        """Check if text starts with emoji characters"""
+        if not text:
+            return False
+        
+        text_clean = text.strip()
+        if not text_clean:
+            return False
+        
+        # Same emoji pattern as above
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U00002700-\U000027BF"  # dingbats
+            "\U0001F900-\U0001F9FF"  # supplemental symbols
+            "\U00002600-\U000026FF"  # miscellaneous symbols
+            "\U0001F000-\U0001F02F"  # mahjong tiles
+            "\U0001F0A0-\U0001F0FF"  # playing cards
+            "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-A
+            "\U0000FE00-\U0000FE0F"  # variation selectors
+            "\U0000200D"             # zero width joiner
+            "]+")
+        
+        # Check if text starts with emoji
+        match = emoji_pattern.match(text_clean)
+        return match is not None
+    
     def has_meaningful_text(self, element):
-        """Check if element has meaningful text content (not just whitespace)"""
+        """Check if element has meaningful text content (not whitespace)"""
         if not element.get_text():
             return False
         
@@ -59,14 +123,26 @@ class ADTValidator:
         
         # Check if element has meaningful text
         if self.has_meaningful_text(element):
+            # Skip emoji-only elements or elements that start with emojis
+            element_text = element.get_text().strip()
+            if (self.is_emoji_only(element_text) or
+                    self.starts_with_emoji(element_text)):
+                return violations
+                
             data_id = element.get('data-id')
             
             # Check if data-id is missing or empty
             if not data_id or data_id.strip() == "":
+                text_content = element.get_text()
+                if len(text_content) > 100:
+                    text_display = text_content[:100] + "..."
+                else:
+                    text_display = text_content
+                    
                 violation = {
                     'file': file_path,
                     'tag': element.name,
-                    'text': element.get_text()[:100] + "..." if len(element.get_text()) > 100 else element.get_text(),
+                    'text': text_display,
                     'line': getattr(element, 'sourceline', 'unknown'),
                     'classes': element.get('class', []),
                     'id': element.get('id', ''),
@@ -158,7 +234,8 @@ class ADTValidator:
                             print(f"      Classes: {violation['classes']}")
                         print()
             else:
-                print(f"⚠️  {html_file.name} - ERROR: {result.get('message', 'Unknown error')}")
+                error_msg = result.get('message', 'Unknown error')
+                print(f"⚠️  {html_file.name} - ERROR: {error_msg}")
         
         return True
     
@@ -177,10 +254,13 @@ class ADTValidator:
             print(f"Success rate: {success_rate:.1f}%")
         
         if self.total_violations == 0:
-            print("\n🎉 All files are valid! Every text element has a data-id attribute.")
+            print("\n🎉 All files are valid! Every text element has a "
+                  "data-id attribute.")
         else:
-            print(f"\n⚠️  Found {self.total_violations} elements missing data-id attributes.")
-            print("   Consider running restructure_text.py to add missing data-id attributes.")
+            print(f"\n⚠️  Found {self.total_violations} elements missing "
+                  "data-id attributes.")
+            print("   Consider running restructure_text.py to add missing "
+                  "data-id attributes.")
     
     def save_report(self, output_file):
         """Save detailed validation report to file"""

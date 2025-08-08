@@ -51,8 +51,8 @@ validate-verbose: build
 validate-report: build
 	@echo "Validating HTML files and saving report..."
 	-docker run --rm -v "$(PARENT_DIR):/workspace" \
-		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR)) --output /workspace/validation_report.txt
-	@echo "Report saved to ../validation_report.txt"
+		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR)) --output /workspace/adt-utils/validation_report.txt
+	@echo "Report saved to validation_report.txt"
 
 # Fix missing data-id attributes
 fix-data-ids: build

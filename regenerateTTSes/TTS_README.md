@@ -1,13 +1,31 @@
-# TTS Audio Regeneration Script
+# TTS Audio & Text Regeneration Scripts
 
-This script asynchronously regenerates TTS (Text-to-Speech) audio files for text keys using OpenAI's TTS API. It supports both English and Spanish languages, with Spanish using El Salvador accent features.
+This directory contains scripts for regenerating both TTS audio files and simplified text content using OpenAI's API. It supports both English and Spanish languages.
+
+## Scripts Overview
+
+### 🔊 `regenerate_tts.py` - TTS Audio Regeneration
+Regenerates TTS audio files using OpenAI's `gpt-4o-mini-tts` model with El Salvador Spanish accent features.
+
+### 📝 `regenerate_text.py` - Text Content Regeneration  
+Regenerates simplified text content (EasyRead and ELI5) using OpenAI's `gpt-4o-mini` model.
 
 ## Features
 
-- ✅ **Asynchronous processing** for faster generation
-- ✅ **Page range support** - regenerate specific sections (e.g., pages 0-5)
+### TTS Audio Features
+- ✅ **Enhanced TTS Model** - Uses `gpt-4o-mini-tts` for improved quality
+- ✅ **El Salvador Spanish accent** - Custom instructions for authentic pronunciation
+- ✅ **Streaming audio generation** - Efficient file creation
+
+### Text Regeneration Features  
+- ✅ **EasyRead Generation** - Simplified text for accessibility
+- ✅ **ELI5 Generation** - Child-friendly explanations
+- ✅ **Context-aware prompts** - Language and type-specific instructions
+
+### Shared Features
+- ✅ **Asynchronous processing** - Faster generation with concurrent requests
+- ✅ **Page range support** - Regenerate specific sections (e.g., pages 0-5)
 - ✅ **Multi-language support** - English and Spanish
-- ✅ **El Salvador Spanish accent** - Custom prompting for authentic pronunciation
 - ✅ **Rate limiting** - Respects API limits with concurrent request management
 - ✅ **Comprehensive logging** - Detailed logs for debugging and monitoring
 - ✅ **Progress tracking** - Real-time status updates and summary reports
@@ -53,7 +71,7 @@ output/
 
 ## Usage
 
-### Basic Usage
+### TTS Audio Regeneration
 
 ```bash
 # Regenerate English audio for pages 0-5
@@ -64,6 +82,19 @@ python regenerate_tts.py --start-page 10 --end-page 15 --language es
 
 # Regenerate both languages for pages 0-5
 python regenerate_tts.py --start-page 0 --end-page 5 --language both
+```
+
+### Text Content Regeneration
+
+```bash
+# Generate EasyRead text for pages 0-5 in Spanish
+python regenerate_text.py --start-page 0 --end-page 5 --language es --type easyread
+
+# Generate ELI5 text for pages 10-15 in English  
+python regenerate_text.py --start-page 10 --end-page 15 --language en --type eli5
+
+# Generate both types for pages 0-10 in both languages
+python regenerate_text.py --start-page 0 --end-page 10 --language both --type both
 ```
 
 ### Advanced Usage

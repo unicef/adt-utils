@@ -2,16 +2,21 @@
 
 ## Overview
 
-I've successfully created a comprehensive Python script that asynchronously regenerates TTS audio files for your text content using OpenAI's API. The script supports both English and Spanish, with special attention to El Salvador Spanish accent features.
+I've successfully updated the comprehensive Python script to use OpenAI's latest `gpt-4o-mini-tts` model for asynchronously regenerating TTS audio files. The script supports both English and Spanish, with special attention to El Salvador Spanish accent features.
 
-## Files Created
+## Files Updated
 
 ### 1. `regenerate_tts.py` - Main Script
-- **Purpose**: Asynchronous TTS audio regeneration using OpenAI's API
+- **Purpose**: Asynchronous TTS audio regeneration using OpenAI's `gpt-4o-mini-tts` model
+- **Key Updates**:
+  - ✅ **New Model**: Now uses `gpt-4o-mini-tts` instead of `tts-1`
+  - ✅ **OpenAI Client**: Uses official OpenAI Python client with streaming response
+  - ✅ **Instructions Parameter**: Uses `instructions` instead of text prefixes for accent control
+  - ✅ **Coral Voice**: Updated to use `coral` voice for Spanish (works well with new model)
 - **Features**:
   - Page range support (e.g., `--start-page 0 --end-page 5`)
   - Multi-language support (English, Spanish, or both)
-  - El Salvador Spanish accent prompting
+  - El Salvador Spanish accent instructions
   - Rate limiting (max 5 concurrent requests)
   - Comprehensive logging
   - Progress tracking and summary reports
@@ -19,14 +24,11 @@ I've successfully created a comprehensive Python script that asynchronously rege
 ### 2. `requirements.txt` - Dependencies
 - `aiohttp>=3.8.0` - Async HTTP client for API calls
 - `aiofiles>=22.1.0` - Async file I/O operations
+- ✅ `openai>=1.0.0` - **NEW**: Official OpenAI Python client
 
-### 3. `setup_tts.py` - Environment Setup
-- **Purpose**: Verify environment and install dependencies
-- **Features**:
-  - Python version checking (3.7+ required)
-  - Dependency installation
-  - API key validation
-  - Directory structure verification
+### 3. `demo_spanish_accent.py` - Demo Script
+- **Updated**: Now uses `get_voice_and_instructions()` method
+- **Shows**: New instructions-based approach for accent control
 
 ### 4. `example_tts_usage.py` - Usage Examples
 - **Purpose**: Demonstrates programmatic usage of the TTSRegenerator class

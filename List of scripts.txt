@@ -1,0 +1,35 @@
+Scripts for Marvik
+
+1. Validate ADT -> Check for problems that need to be corrected.
+2. Fix missing data-ids.
+3. Restructure text.
+4. Standardize headings. 
+5. Standardize html.
+6. Standardize image text layouts.
+
+JSON update
+1. Regenerate image descriptions.
+2. Regenerate eli5.
+3. Regenerate easy-read
+2. Regenerate text translations.
+
+TTS
+1. Regenerate text tts 
+
+
+adt-utils/
+├── standardize_html.py                 # HTML structure standardization
+
+    - This script...
+
+├── standardize_headings.py             # Heading typography & colors
+
+    - This script standardizes the heading sizes and colors
+
+├── standardize_image_text_layouts.py   # Layout optimization
+
+    - ??
+
+├── demo_standardization.py             # Demo/testing script
+
+    - ??

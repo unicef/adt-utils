@@ -32,7 +32,7 @@ def check_api_key():
 
 def check_directories():
     """Check if required directories exist."""
-    output_dir = Path("output/content/i18n")
+    output_dir = Path("content/i18n")
     
     required_dirs = [
         output_dir / "en",

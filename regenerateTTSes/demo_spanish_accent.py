@@ -12,20 +12,20 @@ def demo_spanish_prompting():
     # Create a regenerator instance (dummy key for demo)
     regenerator = TTSRegenerator("dummy-key")
     
-    # Show the voice and prompt configuration
-    voice_en, prompt_en = regenerator.get_voice_and_prompt('en')
-    voice_es, prompt_es = regenerator.get_voice_and_prompt('es')
+    # Show the voice and instructions configuration
+    voice_en, instructions_en = regenerator.get_voice_and_instructions('en')
+    voice_es, instructions_es = regenerator.get_voice_and_instructions('es')
     
-    print("TTS Voice and Prompt Configuration")
+    print("TTS Voice and Instructions Configuration")
     print("=" * 50)
     
     print("\n🇺🇸 ENGLISH:")
     print(f"Voice: {voice_en}")
-    print(f"Prompt: {prompt_en}")
+    print(f"Instructions: {instructions_en}")
     
     print("\n🇸🇻 SPANISH (EL SALVADOR):")
     print(f"Voice: {voice_es}")
-    print(f"Prompt: {prompt_es}")
+    print(f"Instructions: {instructions_es}")
     
     print("\n" + "=" * 50)
     print("Spanish Enhancement Features:")
@@ -33,14 +33,15 @@ def demo_spanish_prompting():
     print("✅ Regional pronunciation characteristics") 
     print("✅ Soft pronunciation guidance")
     print("✅ Authentic Central American intonation")
+    print("✅ gpt-4o-mini-tts model for better quality")
     
     # Example of how text would be enhanced
     sample_text = "El autocuidado es fundamental para la salud mental."
-    enhanced_text = f"{prompt_es}{sample_text}"
     
-    print(f"\nSample Enhancement:")
-    print(f"Original: {sample_text}")
-    print(f"Enhanced: {enhanced_text[:100]}...")
+    print(f"\nSample Text:")
+    print(f"Text: {sample_text}")
+    print(f"Voice: {voice_es}")
+    print(f"Instructions: {instructions_es[:100]}...")
 
 if __name__ == "__main__":
     demo_spanish_prompting()

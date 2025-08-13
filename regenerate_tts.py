@@ -18,9 +18,8 @@ import os
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-import aiohttp
-import aiofiles
+from typing import Dict, List, Tuple
+from openai import OpenAI
 from datetime import datetime
 
 # Configure logging
@@ -38,9 +37,8 @@ class TTSRegenerator:
     def __init__(self, openai_api_key: str):
         """Initialize the TTS regenerator with OpenAI API key."""
         self.api_key = openai_api_key
-        self.base_url = "https://api.openai.com/v1/audio/speech"
-        self.output_dir = Path("output/content/i18n")
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.client = OpenAI(api_key=openai_api_key)
+        self.output_dir = Path("content/i18n")
         
         # Rate limiting
         self.max_concurrent_requests = 5
@@ -48,13 +46,12 @@ class TTSRegenerator:
         
     async def __aenter__(self):
         """Async context manager entry."""
-        self.session = aiohttp.ClientSession()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.session:
-            await self.session.close()
+        # No session to close with sync OpenAI client
+        pass
     
     def load_texts(self, language: str) -> Dict[str, str]:
         """Load texts from JSON file for the specified language."""
@@ -89,8 +86,18 @@ class TTSRegenerator:
                 except (ValueError, IndexError):
                     # Skip keys that don't match expected format
                     continue
+            elif key.startswith('easyread-text-'):
+                # Handle easyread-text-{page}-{section} format
+                try:
+                    parts = key.split('-')
+                    if len(parts) >= 3:
+                        page_num = int(parts[2])
+                        if start_page <= page_num <= end_page:
+                            filtered_texts[key] = text
+                except (ValueError, IndexError):
+                    continue
             else:
-                # Include non-text keys if they match the pattern (img-, sectioneli5-, etc.)
+                # Include other keys if they match the pattern (img-, sectioneli5-, etc.)
                 try:
                     parts = key.split('-')
                     if len(parts) >= 2:
@@ -103,65 +110,61 @@ class TTSRegenerator:
         logger.info(f"Filtered to {len(filtered_texts)} texts for pages {start_page}-{end_page}")
         return filtered_texts
     
-    def get_voice_and_prompt(self, language: str) -> Tuple[str, str]:
-        """Get appropriate voice and prompt based on language."""
+    def get_voice_and_instructions(self, language: str) -> Tuple[str, str]:
+        """Get appropriate voice and instructions based on language."""
         if language == 'es':
-            voice = "nova"  # Female voice that works well with Spanish
-            prompt_prefix = ("Habla con el acento y entonación característica de El Salvador. "
-                           "Usa las particularidades del español salvadoreño, incluyendo la "
-                           "pronunciación suave y las características fonéticas típicas de la región. ")
+            voice = "nova"  # Female voice for Spanish - better for teacher tone
+            instructions = ("Lee este texto como si fueras un maestro paciente y cálido "
+                          "enseñando a niños. Usa el acento y entonación característica "
+                          "de El Salvador, incluyendo la pronunciación suave y las "
+                          "características fonéticas típicas de la región salvadoreña. "
+                          "Mantén un tono educativo, amigable y accesible apropiado "
+                          "para contenido educativo dirigido a niños.")
         else:  # English
             voice = "alloy"  # Clear, neutral English voice
-            prompt_prefix = "Speak clearly with a neutral, professional tone. "
+            instructions = ("Speak clearly with a warm, patient teacher tone "
+                          "appropriate for educational content for children.")
             
-        return voice, prompt_prefix
+        return voice, instructions
     
     async def generate_audio(self, text: str, output_path: Path, language: str) -> bool:
-        """Generate audio using OpenAI TTS API."""
+        """Generate audio using OpenAI TTS API with gpt-4o-mini-tts model."""
         if not text.strip():
             logger.warning(f"Empty text for {output_path}, skipping")
             return False
             
-        voice, prompt_prefix = self.get_voice_and_prompt(language)
-        
-        # For Spanish, add accent instruction to the text
-        if language == 'es':
-            enhanced_text = f"{prompt_prefix}{text}"
-        else:
-            enhanced_text = text
+        voice, instructions = self.get_voice_and_instructions(language)
             
         async with self.semaphore:  # Rate limiting
             try:
-                payload = {
-                    "model": "tts-1",  # Using tts-1 as it's more cost-effective than tts-1-hd
-                    "input": enhanced_text,
-                    "voice": voice,
-                    "response_format": "mp3"
-                }
-                
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-                
                 logger.info(f"Generating audio for: {output_path.name}")
                 
-                async with self.session.post(self.base_url, json=payload, headers=headers) as response:
-                    if response.status == 200:
-                        # Ensure output directory exists
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                        
-                        # Write audio file
-                        async with aiofiles.open(output_path, 'wb') as f:
-                            async for chunk in response.content.iter_chunked(8192):
-                                await f.write(chunk)
-                        
-                        logger.info(f"Successfully generated: {output_path.name}")
+                # Ensure output directory exists
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Use sync client in async context - run in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                
+                def generate_sync():
+                    with self.client.audio.speech.with_streaming_response.create(
+                        model="gpt-4o-mini-tts",
+                        voice=voice,
+                        input=text,
+                        instructions=instructions,
+                        response_format="mp3"
+                    ) as response:
+                        response.stream_to_file(output_path)
                         return True
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"API error for {output_path.name}: {response.status} - {error_text}")
-                        return False
+                
+                # Run the sync operation in a thread to avoid blocking event loop
+                success = await loop.run_in_executor(None, generate_sync)
+                
+                if success:
+                    logger.info(f"Successfully generated: {output_path.name}")
+                    return True
+                else:
+                    logger.error(f"Failed to generate: {output_path.name}")
+                    return False
                         
             except Exception as e:
                 logger.error(f"Error generating audio for {output_path.name}: {e}")
@@ -179,10 +182,12 @@ class TTSRegenerator:
         elif text_key.startswith('sectioneli5-'):
             # Section keys: sectioneli5-5-1 -> sectioneli5-5-1_en.mp3
             return f"{text_key}_{language}.mp3"
+        elif text_key.startswith('easyread-text-'):
+            # Easyread keys: easyread-text-5-1 -> easyread-text-5-1_en.mp3
+            return f"{text_key}_{language}.mp3"
         else:
-            # For other keys, try to match existing patterns
-            # Check if it starts with easyread- pattern
-            return f"easyread-{text_key}_{language}.mp3"
+            # For any other keys, use as-is with language suffix
+            return f"{text_key}_{language}.mp3"
     
     async def regenerate_for_language(self, language: str, start_page: int, end_page: int) -> Tuple[int, int]:
         """Regenerate TTS files for a specific language and page range."""

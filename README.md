@@ -11,6 +11,23 @@ A comprehensive collection of Python utilities for standardizing and processing 
 - **Text Restructuring**: Proper span wrapping and paragraph grouping
 - **JSON Text Cleanup**: Remove formatting artifacts from JSON files
 
+### Validation & Auto-Fixing
+- **HTML Validation**: Comprehensive validation of data-id attributes
+- **Auto-Fix Missing Data-IDs**: Automatically adds missing data-id attributes
+- **JSON Integration**: Smart matching with existing translations
+
+### Translation & Localization
+- **Multi-language GPT Translation**: AI-powered translation with context awareness
+- **Flexible Language Support**: Configurable source and target languages (es, en, fr, pt, etc.)
+- **Smart Path Detection**: Automatic discovery of i18n structure in target directories
+- **Simple Translation**: Dictionary-based translation for common terms
+- **Sequential Processing**: Maintains context across related text elements
+
+### TTS Audio Generation
+- **Multi-language TTS**: English and Spanish audio generation
+- **El Salvador Spanish Accent**: Specialized TTS for regional dialect
+- **Batch Processing**: Efficient audio generation for page ranges
+
 ### Smart Content Analysis
 - Automatic text-to-image ratio calculation
 - Intelligent layout strategy selection
@@ -36,8 +53,18 @@ adt-utils/
 ├── clean_json_texts.py              # JSON cleanup utility
 ├── test_single_layout.py           # Test layout on single file
 ├── restore_template.py             # Restore original structure
+├── validate_adt.py                 # HTML validation for data-id attributes
+├── fix_missing_data_ids.py         # Auto-fix missing data-id attributes
 ├── config.py                       # Configuration and path management
 ├── heading_templates.json          # Heading style configurations
+├── regenerate_translations/        # Translation utilities
+│   ├── translate_gpt5.py           # GPT-5 translation with context
+│   ├── translate_page_range.py     # Simple translation utility
+│   └── *.md                        # Translation documentation
+├── regenerate_tts_es/              # TTS audio generation
+│   ├── regenerate_tts.py           # Multi-language TTS generation
+│   ├── setup_tts.py                # TTS setup utilities
+│   └── *.md                        # TTS documentation
 ├── Dockerfile                      # Docker container definition
 ├── docker-compose.yml              # Docker Compose configuration
 ├── Makefile                        # Make commands for Docker operations
@@ -228,6 +255,81 @@ docker-compose run adt-utils python standardize_all.py 6 58
 docker-compose run adt-utils python clean_json_texts.py --dir /workspace/target-folder/content/i18n/
 ```
 
+## 🔄 Complete Workflow: Standardization + Validation + Translation + TTS
+
+### Prerequisites for Extended Workflow
+```bash
+# Set your OpenAI API key for translation and TTS
+export OPENAI_API_KEY=your_api_key_here
+```
+
+### Full Pipeline in One Command
+```bash
+# Complete workflow: validate → fix → translate → TTS
+make complete-workflow TARGET_DIR=../my-project START=10 END=15
+```
+
+### Step-by-Step Workflow
+
+#### 1. Standardization (Original Pipeline)
+```bash
+# Run the original standardization pipeline
+make run-all TARGET_DIR=../my-project START=10 END=15
+```
+
+#### 2. Validation & Auto-Fixing
+```bash
+# Check for missing data-id attributes
+make validate TARGET_DIR=../my-project
+
+# See detailed violations
+make validate-verbose TARGET_DIR=../my-project
+
+# Auto-fix missing data-id attributes
+make fix-data-ids TARGET_DIR=../my-project
+
+# Complete validation and fix workflow
+make validate-fix TARGET_DIR=../my-project
+```
+
+#### 3. Translation
+```bash
+# Simple dictionary-based translation
+make translate-simple TARGET_DIR=../my-project START=10 END=12
+
+# AI-powered translation with context (default: Spanish to English)
+make translate-gpt5 TARGET_DIR=../my-project START=10 END=12
+
+# Translate to different languages (e.g., Spanish to French)
+make translate-gpt5 TARGET_DIR=../my-project START=10 END=12 SOURCE_LANG=es TARGET_LANG=fr
+
+# Translate from English to Portuguese
+make translate-gpt5 TARGET_DIR=../my-project START=10 END=12 SOURCE_LANG=en TARGET_LANG=pt
+
+# Dry run to preview translations
+make translate-gpt5-dry TARGET_DIR=../my-project START=10 END=12
+```
+
+#### 4. TTS Audio Generation
+```bash
+# Generate English TTS
+make regenerate-tts-en TARGET_DIR=../my-project START=10 END=12
+
+# Generate Spanish TTS (with El Salvador accent)
+make regenerate-tts-es TARGET_DIR=../my-project START=10 END=12
+
+# Generate both languages
+make regenerate-tts-both TARGET_DIR=../my-project START=10 END=12
+```
+
+### Workflow Benefits
+- **Automated validation** ensures all text elements have proper data-id attributes
+- **Smart matching** reuses existing translations when possible
+- **Context-aware translation** improves translation quality
+- **Batch processing** handles page ranges efficiently
+- **Multi-language support** for English and Spanish
+- **Regional accent support** for Spanish TTS (El Salvador)
+
 ### Manual Docker Commands
 ```bash
 # Build image
@@ -320,9 +422,19 @@ After running `standardize_all.py`, your files will have:
 | `restructure_text.py` | Advanced text restructuring | `python restructure_text.py 6 58` |
 | `restructure_text_simple.py` | Simplified text restructuring | `python restructure_text_simple.py 6 58` |
 | `clean_json_texts.py` | Clean JSON text formatting | `python clean_json_texts.py --dir ./output/` |
+| `validate_adt.py` | Validate HTML files for data-id attributes | `python validate_adt.py ./target-folder --verbose` |
+| `fix_missing_data_ids.py` | Auto-fix missing data-id attributes | `python fix_missing_data_ids.py ./target-folder` |
 | `demo_standardization.py` | Demo script for testing | `python demo_standardization.py 6 10` |
 | `test_single_layout.py` | Test layout on single file | `python test_single_layout.py file.html` |
 | `restore_template.py` | Restore original structure | `python restore_template.py` |
+
+### Translation & TTS Scripts
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `regenerate_translations/translate_gpt5.py` | AI-powered translation with context (multi-language) | `python translate_gpt5.py /path/to/target 10 15 --source-lang es --target-lang en` |
+| `regenerate_translations/translate_page_range.py` | Simple dictionary-based translation | `python translate_page_range.py 10 15` |
+| `regenerate_tts_es/regenerate_tts.py` | Generate TTS audio for multiple languages | `python regenerate_tts.py --start-page 10 --end-page 15 --language both` |
 
 ## 🚀 Suggested Future Structure
 

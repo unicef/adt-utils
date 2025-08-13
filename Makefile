@@ -2,12 +2,17 @@ DOCKER_IMAGE = adt-utils
 TARGET_DIR = ../target-folder
 START ?= 6
 END ?= 58
+SOURCE_LANG ?= es
+TARGET_LANG ?= en
+
+-include .env
+export
 
 # OS-agnostic path resolution using Make built-in functions
 CURRENT_DIR := $(CURDIR)
 PARENT_DIR := $(dir $(CURRENT_DIR:/=))
 
-.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report fix-data-ids validate-fix help shell debug
+.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report fix-data-ids validate-fix translate-simple translate-gpt5 translate-gpt5-dry regenerate-tts-en regenerate-tts-es regenerate-tts-both complete-workflow check-api-key create-env-template help shell debug
 
 # Build the Docker image
 build:
@@ -70,6 +75,73 @@ validate-fix: build
 	docker run --rm -v "$(PARENT_DIR):/workspace" \
 		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
 
+# Translation commands
+translate-simple: build
+	@echo "Translating pages $(START) to $(END) using simple translation..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-w /workspace/$(notdir $(TARGET_DIR)) \
+		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_page_range.py $(START) $(END)
+
+translate-gpt5: build check-api-key
+	@echo "Translating pages $(START) to $(END) from $(SOURCE_LANG) to $(TARGET_LANG) using GPT..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
+			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
+			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG)
+
+translate-gpt5-dry: build check-api-key
+	@echo "Dry run: Translating pages $(START) to $(END) from $(SOURCE_LANG) to $(TARGET_LANG) using GPT..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
+			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
+			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG) --dry-run
+
+# TTS regeneration commands
+regenerate-tts-en: build check-api-key
+	@echo "Regenerating English TTS for pages $(START) to $(END)..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-w /workspace/$(notdir $(TARGET_DIR)) \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language en
+
+regenerate-tts-es: build check-api-key
+	@echo "Regenerating Spanish TTS for pages $(START) to $(END)..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-w /workspace/$(notdir $(TARGET_DIR)) \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language es
+
+regenerate-tts-both: build check-api-key
+	@echo "Regenerating TTS for both languages, pages $(START) to $(END)..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-w /workspace/$(notdir $(TARGET_DIR)) \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
+
+# Complete workflow: validate → fix → translate → regenerate TTS
+complete-workflow: build check-api-key
+	@echo "Running complete workflow: validate → fix → translate → TTS..."
+	@echo "Step 1/4: Validating HTML files..."
+	-docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
+	@echo "Step 2/4: Fixing missing data-id attributes..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		$(DOCKER_IMAGE) python fix_missing_data_ids.py /workspace/$(notdir $(TARGET_DIR))
+	@echo "Step 3/4: Translating new text entries from $(SOURCE_LANG) to $(TARGET_LANG)..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
+			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
+			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG)
+	@echo "Step 4/4: Regenerating TTS audio files..."
+	docker run --rm -v "$(PARENT_DIR):/workspace" \
+		-w /workspace/$(notdir $(TARGET_DIR)) \
+		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
+	@echo "✅ Complete workflow finished!"
+
 # Test single layout
 test-layout: build
 	@echo "Testing single layout (specify FILE=path/to/file.html)..."
@@ -120,18 +192,35 @@ help:
 	@echo "ADT Utils Docker Commands"
 	@echo "========================="
 	@echo ""
+	@echo "Setup:"
+	@echo "  make create-env-template      - Create .env template file"
+	@echo "  make check-api-key            - Verify OPENAI_API_KEY is set"
+	@echo ""
 	@echo "Basic Usage:"
 	@echo "  make build                    - Build Docker image"
 	@echo "  make run-all START=6 END=58  - Run complete standardization"
 	@echo "  make run-demo                 - Run demo (pages 6-10)"
 	@echo "  make clean-json               - Clean JSON files"
 	@echo ""
-	@echo "Validation:"
+	@echo "Validation & Fixing:"
 	@echo "  make validate                 - Validate HTML files for data-id attributes"
 	@echo "  make validate-verbose         - Validate with detailed violation output"
 	@echo "  make validate-report          - Validate and save report to ../validation_report.txt"
 	@echo "  make fix-data-ids             - Fix missing data-id attributes automatically"
 	@echo "  make validate-fix             - Complete workflow: validate → fix → validate"
+	@echo ""
+	@echo "Translation (requires OPENAI_API_KEY):"
+	@echo "  make translate-simple START=6 END=58         - Simple dictionary-based translation"
+	@echo "  make translate-gpt5 START=6 END=58           - GPT translation with context (es→en by default)"
+	@echo "  make translate-gpt5-dry START=6 END=58       - Dry run of GPT translation"
+	@echo ""
+	@echo "TTS Generation (requires OPENAI_API_KEY):"
+	@echo "  make regenerate-tts-en START=6 END=58        - Regenerate English TTS audio"
+	@echo "  make regenerate-tts-es START=6 END=58        - Regenerate Spanish TTS audio"
+	@echo "  make regenerate-tts-both START=6 END=58      - Regenerate both language TTS"
+	@echo ""
+	@echo "Complete Workflows:"
+	@echo "  make complete-workflow START=6 END=58        - Full pipeline: validate → fix → translate → TTS"
 	@echo ""
 	@echo "Individual Scripts:"
 	@echo "  make run-html START=6 END=58 - HTML structure only"
@@ -148,11 +237,32 @@ help:
 	@echo "  TARGET_DIR (default: ../target-folder) - Target directory relative to parent"
 	@echo "  START (default: 6) - Starting page number"
 	@echo "  END (default: 58) - Ending page number"
+	@echo "  SOURCE_LANG (default: es) - Source language for translation"
+	@echo "  TARGET_LANG (default: en) - Target language for translation"
+	@echo "  OPENAI_API_KEY - Required for translation and TTS commands"
 	@echo ""
 	@echo "Examples:"
+	@echo "  export OPENAI_API_KEY=your_api_key_here"
 	@echo "  make run-all TARGET_DIR=../my-project START=10 END=20"
 	@echo "  make validate TARGET_DIR=../my-project"
-	@echo "  make validate-verbose TARGET_DIR=../my-project"
-	@echo "  make fix-data-ids TARGET_DIR=../my-project"
-	@echo "  make validate-fix TARGET_DIR=../my-project"
-	@echo "  make test-layout FILE=my-project/25_0_adt.html"
+	@echo "  make complete-workflow TARGET_DIR=../my-project START=10 END=15"
+	@echo "  make translate-gpt5 TARGET_DIR=../my-project START=10 END=12"
+	@echo "  make translate-gpt5 TARGET_DIR=../my-project START=10 END=12 SOURCE_LANG=es TARGET_LANG=fr"
+	@echo "  make regenerate-tts-both TARGET_DIR=../my-project START=10 END=12"
+
+# Add a helper target for checking API key using Python
+check-api-key:
+    @python -c "import os; key=os.environ.get('OPENAI_API_KEY'); print('✅ API key is set' if key else '❌ Error: OPENAI_API_KEY not set'); exit(0 if key else 1)"
+
+# Add a helper target for creating .env template
+create-env-template:
+	@echo "Creating .env template..."
+	@echo "# ADT Utils Environment Variables" > .env.template
+	@echo "OPENAI_API_KEY=your_openai_api_key_here" >> .env.template
+	@echo "SOURCE_LANG=es" >> .env.template
+	@echo "TARGET_LANG=en" >> .env.template
+	@echo "# Copy this to .env and fill in your actual values" >> .env.template
+	@echo "✅ Template created: .env.template"
+	@echo "📝 To use it:"
+	@echo "   1. cp .env.template .env"
+	@echo "   2. Edit .env with your actual API key"

@@ -294,7 +294,7 @@ class ADTValidator(ADTValidationMixin):
         else:
             print(f"\n⚠️  Found {self.total_violations} elements missing "
                   "data-id attributes.")
-            print("   Consider running restructure_text.py to add missing "
+            print("   Consider running fix_missing_data_ids.py to add missing "
                   "data-id attributes.")
     
     def save_report(self, output_file):

@@ -1,0 +1,27 @@
+[project]
+name = "adt-utils"
+description = "Utilities for ADT HTML standardization, validation, translation, and TTS"
+authors = [
+    { name = "Guillermo Bergengruen", email = "gbergengruen@unicef.org" },
+    { name = "Elias Constantopedos", email = "econstantopedos@unicef.org" }
+]
+license = "MIT"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.urls]
+homepage = "https://github.com/unicef/adt-utils"
+repository = "https://github.com/unicef/adt-utils"
+documentation = "https://github.com/unicef/adt-utils"
+
+[project.dependencies]
+beautifulsoup4 = "*"
+nltk = "*"
+openai = "*"
+aiohttp = "*"
+aiofiles = "*"
+
+# Add any additional dependencies below
+# pandas = "*"
+# requests = "*"
+# lxml = "*"

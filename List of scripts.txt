@@ -1,35 +1,34 @@
 Scripts for Marvik
 
+PRIORITY SCRIPTS TO START WITH.
 1. Validate ADT -> Check for problems that need to be corrected.
-2. Fix missing data-ids.
-3. Restructure text.
-4. Standardize headings. 
-5. Standardize html.
-6. Standardize image text layouts.
+    - It checks that every single HTML element that encompasses text has a data-id. 
+    - It also filters emojis that are outside of the translation system so the remain.
 
-JSON update
+    TO BE ADDED:
+    - This means if you have nested spans within a <p> it will be able to filter the paragraph out but only flag data-ids on the internal elements. 
+
+2. Fix missing data-ids -> 
+    - Adds data-ids to the internal object and the key to the JSON file.
+
+3. Restructure text -> Puts all text strings in span elements. 
+    - Wrapping text content in <span> tags with data-id attributes.
+    - Moving data-id from <p> tags to <span> tags
+    - Intelligently grouping related spans into paragraphs based on content analysis
+
+NEXT TO WORK ON.
+JSON regeneration - 
 1. Regenerate image descriptions.
 2. Regenerate eli5.
-3. Regenerate easy-read
+3. Regenerate easy-read.
 2. Regenerate text translations.
 
-TTS
-1. Regenerate text tts 
+TTS regeneration - 
+1. Regenerate text tts. 
 
 
-adt-utils/
-├── standardize_html.py                 # HTML structure standardization
+LATER 
+4. Standardize headings. 
+6. Standardize image text layouts.
+5. Standardize html.
 
-    - This script...
-
-├── standardize_headings.py             # Heading typography & colors
-
-    - This script standardizes the heading sizes and colors
-
-├── standardize_image_text_layouts.py   # Layout optimization
-
-    - ??
-
-├── demo_standardization.py             # Demo/testing script
-
-    - ??

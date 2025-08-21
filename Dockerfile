@@ -15,7 +15,7 @@ COPY *.py ./
 COPY *.json ./
 COPY *.md ./
 COPY regenerate_translations/ ./regenerate_translations/
-COPY regenerate_tts_es/ ./regenerate_tts_es/
+# COPY regenerate_tts_es/ ./regenerate_tts_es/
 
 # Set environment variable to indicate Docker environment
 ENV DOCKER_ENV=true

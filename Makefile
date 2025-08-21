@@ -1,7 +1,7 @@
 DOCKER_IMAGE = adt-utils
 TARGET_DIR = ../target-folder
-START ?= 6
-END ?= 58
+START ?= 0
+END ?= 0
 SOURCE_LANG ?= es
 TARGET_LANG ?= en
 
@@ -12,7 +12,8 @@ export
 CURRENT_DIR := $(CURDIR)
 PARENT_DIR := $(dir $(CURRENT_DIR:/=))
 
-.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report fix-data-ids validate-fix translate-simple translate-gpt5 translate-gpt5-dry regenerate-tts-en regenerate-tts-es regenerate-tts-both complete-workflow check-api-key create-env-template help shell debug
+#.PHONY: build run-all run-demo clean-json test-layout validate validate-verbose validate-report fix-data-ids validate-fix translate-simple translate-gpt5 translate-gpt5-dry regenerate-tts-en regenerate-tts-es regenerate-tts-both complete-workflow check-api-key create-env-template help shell debug
+.PHONY: build validate validate-verbose validate-report fix-data-ids validate-fix translate-simple translate-gpt5 check-api-key create-env-template help shell debug
 
 # Build the Docker image
 build:
@@ -20,25 +21,25 @@ build:
 	docker build -t $(DOCKER_IMAGE) .
 
 # Run complete standardization
-run-all: build
-	@echo "Running complete standardization (pages $(START) to $(END))..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		-e ADT_JSON_DIR=/workspace/$(notdir $(TARGET_DIR))/content/i18n/ \
-		$(DOCKER_IMAGE) python standardize_all.py $(START) $(END)
+#run-all: build
+#	@echo "Running complete standardization (pages $(START) to $(END))..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		-e ADT_JSON_DIR=/workspace/$(notdir $(TARGET_DIR))/content/i18n/ \
+#		$(DOCKER_IMAGE) python standardize_all.py $(START) $(END)
 
 # Run demo standardization
-run-demo: build
-	@echo "Running demo standardization..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		$(DOCKER_IMAGE) python demo_standardization.py 6 10
+#run-demo: build
+#	@echo "Running demo standardization..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		$(DOCKER_IMAGE) python demo_standardization.py 6 10
 
 # Clean JSON files
-clean-json: build
-	@echo "Cleaning JSON files..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		$(DOCKER_IMAGE) python clean_json_texts.py --dir /workspace/$(notdir $(TARGET_DIR))/content/i18n/
+#clean-json: build
+#	@echo "Cleaning JSON files..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		$(DOCKER_IMAGE) python clean_json_texts.py --dir /workspace/$(notdir $(TARGET_DIR))/content/i18n/
 
 # Validate HTML files for data-id attributes
 validate: build
@@ -90,88 +91,88 @@ translate-gpt5: build check-api-key
 			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
 			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG)
 
-translate-gpt5-dry: build check-api-key
-	@echo "Dry run: Translating pages $(START) to $(END) from $(SOURCE_LANG) to $(TARGET_LANG) using GPT..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
-			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
-			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG) --dry-run
+#translate-gpt5-dry: build check-api-key
+#	@echo "Dry run: Translating pages $(START) to $(END) from $(SOURCE_LANG) to $(TARGET_LANG) using GPT..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
+#			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
+#			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG) --dry-run
 
 # TTS regeneration commands
-regenerate-tts-en: build check-api-key
-	@echo "Regenerating English TTS for pages $(START) to $(END)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-w /workspace/$(notdir $(TARGET_DIR)) \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language en
+#regenerate-tts-en: build check-api-key
+#	@echo "Regenerating English TTS for pages $(START) to $(END)..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-w /workspace/$(notdir $(TARGET_DIR)) \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language en
 
-regenerate-tts-es: build check-api-key
-	@echo "Regenerating Spanish TTS for pages $(START) to $(END)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-w /workspace/$(notdir $(TARGET_DIR)) \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language es
+#regenerate-tts-es: build check-api-key
+#	@echo "Regenerating Spanish TTS for pages $(START) to $(END)..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-w /workspace/$(notdir $(TARGET_DIR)) \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language es
 
-regenerate-tts-both: build check-api-key
-	@echo "Regenerating TTS for both languages, pages $(START) to $(END)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-w /workspace/$(notdir $(TARGET_DIR)) \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
+#regenerate-tts-both: build check-api-key
+#	@echo "Regenerating TTS for both languages, pages $(START) to $(END)..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-w /workspace/$(notdir $(TARGET_DIR)) \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
 
 # Complete workflow: validate → fix → translate → regenerate TTS
-complete-workflow: build check-api-key
-	@echo "Running complete workflow: validate → fix → translate → TTS..."
-	@echo "Step 1/4: Validating HTML files..."
-	-docker run --rm -v "$(PARENT_DIR):/workspace" \
-		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
-	@echo "Step 2/4: Fixing missing data-id attributes..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		$(DOCKER_IMAGE) python fix_missing_data_ids.py /workspace/$(notdir $(TARGET_DIR))
-	@echo "Step 3/4: Translating new text entries from $(SOURCE_LANG) to $(TARGET_LANG)..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
-			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
-			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG)
-	@echo "Step 4/4: Regenerating TTS audio files..."
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-w /workspace/$(notdir $(TARGET_DIR)) \
-		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
-		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
-	@echo "✅ Complete workflow finished!"
+#complete-workflow: build check-api-key
+#	@echo "Running complete workflow: validate → fix → translate → TTS..."
+#	@echo "Step 1/4: Validating HTML files..."
+#	-docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		$(DOCKER_IMAGE) python validate_adt.py /workspace/$(notdir $(TARGET_DIR))
+#	@echo "Step 2/4: Fixing missing data-id attributes..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		$(DOCKER_IMAGE) python fix_missing_data_ids.py /workspace/$(notdir $(TARGET_DIR))
+#	@echo "Step 3/4: Translating new text entries from $(SOURCE_LANG) to $(TARGET_LANG)..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_translations/translate_gpt5.py \
+#			/workspace/$(notdir $(TARGET_DIR)) $(START) $(END) \
+#			--source-lang $(SOURCE_LANG) --target-lang $(TARGET_LANG)
+#	@echo "Step 4/4: Regenerating TTS audio files..."
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-w /workspace/$(notdir $(TARGET_DIR)) \
+#		-e OPENAI_API_KEY=$(OPENAI_API_KEY) \
+#		$(DOCKER_IMAGE) python /app/regenerate_tts_es/regenerate_tts.py --start-page $(START) --end-page $(END) --language both
+#	@echo "✅ Complete workflow finished!"
 
 # Test single layout
-test-layout: build
-	@echo "Testing single layout (specify FILE=path/to/file.html)..."
-	@if [ -z "$(FILE)" ]; then \
-		echo "Error: Please specify FILE=path/to/file.html"; \
-		exit 1; \
-	fi
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		$(DOCKER_IMAGE) python test_single_layout.py /workspace/$(FILE)
+#test-layout: build
+#	@echo "Testing single layout (specify FILE=path/to/file.html)..."
+#	@if [ -z "$(FILE)" ]; then \
+#		echo "Error: Please specify FILE=path/to/file.html"; \
+#		exit 1; \
+#	fi
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		$(DOCKER_IMAGE) python test_single_layout.py /workspace/$(FILE)
 
 # Run individual scripts
-run-html: build
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		$(DOCKER_IMAGE) python standardize_html.py $(START) $(END)
+#run-html: build
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		$(DOCKER_IMAGE) python standardize_html.py $(START) $(END)
 
-run-headings: build
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		$(DOCKER_IMAGE) python standardize_headings.py $(START) $(END)
+#run-headings: build
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		$(DOCKER_IMAGE) python standardize_headings.py $(START) $(END)
 
-run-layouts: build
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		$(DOCKER_IMAGE) python standardize_image_text_layouts.py
+#run-layouts: build
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		$(DOCKER_IMAGE) python standardize_image_text_layouts.py
 
-run-text: build
-	docker run --rm -v "$(PARENT_DIR):/workspace" \
-		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
-		$(DOCKER_IMAGE) python restructure_text_simple.py $(START) $(END)
+#run-text: build
+#	docker run --rm -v "$(PARENT_DIR):/workspace" \
+#		-e ADT_OUTPUT_DIR=/workspace/$(notdir $(TARGET_DIR)) \
+#		$(DOCKER_IMAGE) python restructure_text_simple.py $(START) $(END)
 
 # Shell access for debugging
 shell: build

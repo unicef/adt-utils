@@ -14,9 +14,13 @@ class ADTValidator(Validator):
     """Production ADT HTML validator."""
     
     def __init__(self):
-        self.exempt_tags = {
-            'script', 'style', 'meta', 'title', 'head',
-            'html', 'body', 'br', 'hr'
+        # Tags that should be completely skipped (no processing of children)
+        self.skip_tags = {
+            'script', 'style', 'meta', 'title', 'head', 'br', 'hr'
+        }
+        # Tags that don't need data-id themselves but their children should be processed
+        self.container_tags = {
+            'html', 'body', 'div', 'section', 'article', 'nav', 'main', 'aside', 'header', 'footer'
         }
     
     def validate_config(self, config: ValidationConfig) -> List[str]:
@@ -83,7 +87,8 @@ class ADTValidator(Validator):
                 if hasattr(element, 'name') and element.name:
                     current_path = f"{path} > {element.name}" if path else element.name
                     
-                    if element.name.lower() in self.exempt_tags:
+                    # Skip these tags completely (don't process children)
+                    if element.name.lower() in self.skip_tags:
                         return
                     
                     has_text_content = False
@@ -96,7 +101,8 @@ class ADTValidator(Validator):
                                 has_text_content = True
                                 direct_text += text + " "
                     
-                    if has_text_content:
+                    # Only check for data-id if element has text content AND is not a container tag
+                    if has_text_content and element.name.lower() not in self.container_tags:
                         data_id = element.get('data-id')
                         if not data_id or not data_id.strip():
                             issues.append({
@@ -106,6 +112,7 @@ class ADTValidator(Validator):
                                 'issue': 'Missing or empty data-id attribute'
                             })
                     
+                    # Always process children (unless it was skipped above)
                     for child in element.children:
                         if hasattr(child, 'name'):
                             check_element(child, current_path)

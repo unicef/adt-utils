@@ -25,9 +25,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
         id="validate_adt",
         name="ADT HTML Validator",
         description="Validates HTML files for required data-id attributes and ADT compliance",
-        path=str(
-            os.path.join("src", "validation", "scripts", "validate_adt.py")
-        ),
+        path=str(os.path.join("src", "validation", "scripts", "validate_adt.py")),
         category=ScriptCategory.VALIDATION,
         production_ready=True,
         arguments=[
@@ -221,24 +219,25 @@ def get_script_command(script_id: str, **kwargs) -> Optional[str]:
     path = script.path
     cmd_parts = [f"python3 {path}"]
 
-    # Add required arguments
-    for arg in script.arguments.required:
-        arg_name = arg["name"]
-        if arg_name in kwargs:
-            cmd_parts.append(str(kwargs[arg_name]))
-        else:
-            cmd_parts.append(f"<{arg_name}>")
+    # Add positional arguments first (required arguments)
+    for arg in script.arguments:
+        if arg.required:
+            arg_name = arg.name
+            if arg_name in kwargs:
+                cmd_parts.append(str(kwargs[arg_name]))
+            else:
+                cmd_parts.append(f"<{arg_name}>")
 
-    # Add optional arguments
-    for arg in script.arguments.optional:
-        arg_name = arg["name"].lstrip("-")
-        flag_name = arg["name"]
+    # Add optional arguments (flags)
+    for arg in script.arguments:
+        if not arg.required:
+            arg_name = arg.name
 
-        if arg_name in kwargs:
-            if arg["type"] == "flag" and kwargs[arg_name]:
-                cmd_parts.append(flag_name)
-            elif arg["type"] != "flag":
-                cmd_parts.append(f"{flag_name} {kwargs[arg_name]}")
+            if arg_name in kwargs:
+                if arg.type == "bool" and kwargs[arg_name]:
+                    cmd_parts.append(f"--{arg_name}")
+                elif arg.type != "bool" and kwargs[arg_name] is not None:
+                    cmd_parts.append(f"--{arg_name} {kwargs[arg_name]}")
 
     return " ".join(cmd_parts)
 

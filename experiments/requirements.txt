@@ -1,0 +1,23 @@
+# Experimental dependencies (additional to production requirements)
+# Install with: pip install -r requirements.txt -r experiments/requirements.txt
+
+# AI and ML libraries
+openai>=1.0.0
+anthropic>=0.18.0
+
+# Advanced text processing
+nltk>=3.8
+spacy>=3.6.0
+
+# TTS libraries
+gTTS>=2.3.0
+pyttsx3>=2.90
+
+# Image processing
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Additional utilities
+requests>=2.31.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0

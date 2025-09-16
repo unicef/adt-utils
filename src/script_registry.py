@@ -127,6 +127,70 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ),
         ],
     ),
+    Script(
+        id="regenerate_tts",
+        name="ADT TTS Regenerator",
+        description="Regenerates TTS audio files for HTML content using OpenAI API",
+        path=str(os.path.join("src", "regeneration", "scripts", "regenerate_tts.py")),
+        category=ScriptCategory.REGENERATION,
+        production_ready=True,
+        arguments=[
+            ScriptArgument(
+                name="target_dir",
+                type="str",
+                description="Target directory path containing HTML files to validate",
+                required=True,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="start-page",
+                type="int",
+                description="Specific starting page to regenerate (empty for all pages)",
+                required=False,
+                show_in_ui=True,
+                default="",
+            ),
+            ScriptArgument(
+                name="end-page",
+                type="int",
+                description="Specific ending page to regenerate (empty for all pages)",
+                required=False,
+                show_in_ui=True,
+                default="",
+            ),
+            ScriptArgument(
+                name="languages",
+                type="str",
+                description="Comma-separated list of languages to regenerate (e.g. 'en,es')",
+                required=True,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="input_json",
+                type="str",
+                description="Path to input JSON file containing text content (overrides HTML parsing)",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+        ],
+        examples=[
+            ScriptExample(
+                command="python3 {path} ./output --languages en,es",
+                description="Regenerate the TTS of all strings in all HTML files in ./output directory into the output/audio folder in the desired languages",
+            ),
+            ScriptExample(
+                command="python3 {path} ./output --start-page 1 --end-page 10  --languages en,es",
+                description="Regenerate TTS for pages 1-10 only",
+            ),
+            ScriptExample(
+                command="python3 {path} ./output --input-json changes.json --languages es",
+                description="Regenerate TTS for texts specified in changes.json only, in Spanish",
+            ),
+        ],
+    ),
 ]
 
 

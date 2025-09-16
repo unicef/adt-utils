@@ -8,6 +8,7 @@ class ScriptCategory(str, Enum):
     VALIDATION = "validation"
     FIXING = "fixing"
     RESTRUCTURING = "restructuring"
+    REGENERATION = "regeneration"
     OTHER = "other"
 
 

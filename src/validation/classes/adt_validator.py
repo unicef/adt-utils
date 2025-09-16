@@ -14,9 +14,13 @@ class ADTValidator(Validator):
     """Production ADT HTML validator."""
     
     def __init__(self):
-        self.exempt_tags = {
-            'script', 'style', 'meta', 'title', 'head',
-            'html', 'body', 'br', 'hr'
+        # Tags that should be completely skipped (no processing of children)
+        self.skip_tags = {
+            'script', 'style', 'meta', 'title', 'head', 'br', 'hr'
+        }
+        # Tags that don't need data-id themselves but their children should be processed
+        self.container_tags = {
+            'html', 'body', 'div', 'section', 'article', 'nav', 'main', 'aside', 'header', 'footer'
         }
     
     def validate_config(self, config: ValidationConfig) -> List[str]:
@@ -35,10 +39,13 @@ class ADTValidator(Validator):
         result = ProcessResult(success=True)
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
         
-        # Find HTML files
-        html_files = list(target_dir.glob("**/*.html"))
+        # Find HTML files only in the root directory (not subdirectories)
+        html_files = list(target_dir.glob("*.html"))
         if not html_files:
             return ProcessResult(success=False, errors=["No HTML files found"])
+        
+        # Filter out non-content files (assets, tests, navigation, etc.)
+        html_files = self._filter_content_files(html_files)
         
         # Filter by page range if specified
         if config.start_page != -1 or config.end_page != -1:
@@ -80,7 +87,8 @@ class ADTValidator(Validator):
                 if hasattr(element, 'name') and element.name:
                     current_path = f"{path} > {element.name}" if path else element.name
                     
-                    if element.name.lower() in self.exempt_tags:
+                    # Skip these tags completely (don't process children)
+                    if element.name.lower() in self.skip_tags:
                         return
                     
                     has_text_content = False
@@ -93,7 +101,8 @@ class ADTValidator(Validator):
                                 has_text_content = True
                                 direct_text += text + " "
                     
-                    if has_text_content:
+                    # Only check for data-id if element has text content AND is not a container tag
+                    if has_text_content and element.name.lower() not in self.container_tags:
                         data_id = element.get('data-id')
                         if not data_id or not data_id.strip():
                             issues.append({
@@ -103,11 +112,18 @@ class ADTValidator(Validator):
                                 'issue': 'Missing or empty data-id attribute'
                             })
                     
+                    # Always process children (unless it was skipped above)
                     for child in element.children:
                         if hasattr(child, 'name'):
                             check_element(child, current_path)
             
-            check_element(soup)
+            # Start validation from body element to avoid document-level issues
+            body = soup.find('body')
+            if body:
+                check_element(body)
+            else:
+                # Fallback to full document if no body found
+                check_element(soup)
             
             return {
                 'page_number': page_number,
@@ -122,8 +138,48 @@ class ADTValidator(Validator):
     
     def _extract_page_number(self, file_path: Path) -> int:
         """Extract page number from file path."""
+        # First try the original pattern for files like "page10_0_adt.html"
         match = re.search(r'page[\-_]?(\d+)', file_path.name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        
+        # Then try pattern for files like "10_0_adt.html" (number at start)
+        match = re.search(r'^(\d+)', file_path.name)
         return int(match.group(1)) if match else 0
+    
+    def _filter_content_files(self, files: List[Path]) -> List[Path]:
+        """Filter out non-content files (assets, navigation, tests, etc.)."""
+        content_files = []
+        exclude_patterns = [
+            '**/assets/**',
+            '**/old/**', 
+            '**/node_modules/**',
+            '**/test*',
+            '**/nav*',
+            '**/*test*',
+            '**/*nav*'
+        ]
+        
+        for file_path in files:
+            # Convert to relative path for pattern matching
+            try:
+                # Check if file matches any exclude pattern
+                should_exclude = False
+                file_str = str(file_path)
+                
+                for pattern in exclude_patterns:
+                    if pattern.replace('**/', '') in file_str or pattern.replace('*', '') in file_str:
+                        should_exclude = True
+                        break
+                
+                if not should_exclude:
+                    content_files.append(file_path)
+                    
+            except Exception:
+                # If there's any issue, include the file to be safe
+                content_files.append(file_path)
+        
+        return content_files
     
     def _filter_by_page_range(self, files: List[Path], start_page: int, end_page: int) -> List[Path]:
         """Filter files by page range."""

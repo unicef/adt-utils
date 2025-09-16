@@ -43,10 +43,13 @@ class ADTDataFixer(DataFixer):
         result = ProcessResult(success=True)
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
         
-        # Find HTML files
-        html_files = list(target_dir.glob("**/*.html"))
+        # Find HTML files only in the root directory (not subdirectories)
+        html_files = list(target_dir.glob("*.html"))
         if not html_files:
             return ProcessResult(success=False, errors=["No HTML files found"])
+        
+        # Filter out non-content files (assets, tests, navigation, etc.)
+        html_files = self.validator._filter_content_files(html_files)
         
         # Filter by page range if specified
         if config.start_page != -1 or config.end_page != -1:
@@ -121,9 +124,14 @@ class ADTDataFixer(DataFixer):
     
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""
-        if not hasattr(element, 'name') or element.name in self.validator.exempt_tags:
+        if not hasattr(element, 'name'):
+            return False
+            
+        # Skip these tags completely (don't process)
+        if element.name.lower() in self.validator.skip_tags:
             return False
         
+        # Already has data-id, no need to fix
         if element.get('data-id'):
             return False
         
@@ -133,7 +141,8 @@ class ADTDataFixer(DataFixer):
             if isinstance(content, NavigableString) and not isinstance(content, Comment):
                 direct_text += str(content)
         
-        return bool(direct_text.strip())
+        # Only fix if element has text content AND is not a container tag
+        return bool(direct_text.strip()) and element.name.lower() not in self.validator.container_tags
     
     def _get_html_lang(self, soup) -> str:
         """Extract language code from HTML."""

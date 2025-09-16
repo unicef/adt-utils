@@ -9,7 +9,7 @@ their descriptions, arguments, and how to run them.
 import os
 from pathlib import Path
 import sys
-from typing import Dict, List, Any, Optional
+from typing import List, Optional
 
 sys.path.append(os.getcwd())
 
@@ -34,31 +34,15 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="str",
                 description="Target directory path containing HTML files to validate",
                 required=True,
-                replaceable=True,
+                show_in_ui=False,
                 default=None,
-            ),
-            ScriptArgument(
-                name="start_page",
-                type="int",
-                description="Starting page number (-1 for all pages)",
-                required=False,
-                replaceable=False,
-                default=-1,
-            ),
-            ScriptArgument(
-                name="end_page",
-                type="int",
-                description="Ending page number (-1 for all pages)",
-                required=False,
-                replaceable=False,
-                default=-1,
             ),
             ScriptArgument(
                 name="verbose",
                 type="bool",
                 description="Enable verbose output showing detailed validation issues",
                 required=False,
-                replaceable=False,
+                show_in_ui=True,
                 default=False,
             ),
             ScriptArgument(
@@ -66,7 +50,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="str",
                 description="Save detailed validation report to specified file",
                 required=False,
-                replaceable=False,
+                show_in_ui=False,
                 default=None,
             ),
             ScriptArgument(
@@ -74,7 +58,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="bool",
                 description="Attempt to auto-fix validation issues (experimental)",
                 required=False,
-                replaceable=False,
+                show_in_ui=False,
                 default=False,
             ),
         ],
@@ -108,40 +92,24 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="str",
                 description="Target directory path containing HTML files to validate",
                 required=True,
-                replaceable=True,
+                show_in_ui=False,
                 default=None,
-            ),
-            ScriptArgument(
-                name="start_page",
-                type="int",
-                description="Starting page number (-1 for all pages)",
-                required=False,
-                default=-1,
-                replaceable=False,
-            ),
-            ScriptArgument(
-                name="end_page",
-                type="int",
-                description="Ending page number (-1 for all pages)",
-                required=False,
-                replaceable=False,
-                default=-1,
             ),
             ScriptArgument(
                 name="dry_run",
                 type="bool",
                 description="Preview changes without modifying files",
                 required=False,
+                show_in_ui=False,
                 default=False,
-                replaceable=False,
             ),
             ScriptArgument(
                 name="verbose",
                 type="bool",
                 description="Show detailed information about each fix",
                 required=False,
+                show_in_ui=True,
                 default=False,
-                replaceable=False,
             ),
         ],
         examples=[

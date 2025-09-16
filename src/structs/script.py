@@ -10,17 +10,20 @@ class ScriptCategory(str, Enum):
     RESTRUCTURING = "restructuring"
     OTHER = "other"
 
+
 class ScriptArgument(BaseModel):
     name: str
     type: str
     description: str
     required: bool = True
+    show_in_ui: bool = False
     default: Any = None
-    replaceable: bool = False
+
 
 class ScriptExample(BaseModel):
     command: str
     description: str
+
 
 class Script(BaseModel):
     id: str

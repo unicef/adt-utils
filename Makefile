@@ -253,7 +253,7 @@ help:
 
 # Add a helper target for checking API key using Python
 check-api-key:
-    @python -c "import os; key=os.environ.get('OPENAI_API_KEY'); print('✅ API key is set' if key else '❌ Error: OPENAI_API_KEY not set'); exit(0 if key else 1)"
+	@python -c "import os; key=os.environ.get('OPENAI_API_KEY'); print('✅ API key is set' if key else '❌ Error: OPENAI_API_KEY not set'); exit(0 if key else 1)"
 
 # Add a helper target for creating .env template
 create-env-template:

@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir beautifulsoup4 nltk openai aiohttp aiofiles
 COPY *.py ./
 COPY *.json ./
 COPY *.md ./
-COPY regenerate_translations/ ./regenerate_translations/
+# COPY regenerate_translations/ ./regenerate_translations/
 # COPY regenerate_tts_es/ ./regenerate_tts_es/
 
 # Set environment variable to indicate Docker environment

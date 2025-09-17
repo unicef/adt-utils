@@ -1,6 +1,6 @@
 # ADT Utils
 
-A comprehensive Python toolkit for HTML standardization, validation, translation, and TTS generation in the ADT (Adaptive Document Technology) project by UNICEF.
+A comprehensive Python toolkit for HTML standardization, validation, translation, and TTS generation in the ADT (Accessible Digital Textbooks) project by UNICEF.
 
 ## 🎯 Purpose
 

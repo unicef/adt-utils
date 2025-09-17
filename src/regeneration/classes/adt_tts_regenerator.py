@@ -154,3 +154,46 @@ class ADTTSRegenerator:
         duration = end_time - start_time
         self.logger.info(f"TTS regeneration completed in {duration}")
         return results
+
+    async def regenerate_from_json(self, input_json: str, languages: List[str]) -> Dict[str, Tuple[int, int]]:
+        """
+        Regenerate TTS audio files from a provided JSON file for the specified languages.
+        The JSON file should contain a dictionary of text keys and their content.
+        """
+        self.logger.info(f"Starting TTS regeneration from JSON: {input_json} for languages: {languages}")
+        start_time = datetime.now()
+        results = {}
+
+        # Load texts from JSON
+        try:
+            with open(input_json, 'r', encoding='utf-8') as f:
+                all_texts = json.load(f)
+        except Exception as e:
+            self.logger.error(f"Error loading input JSON file: {e}")
+            return {lang: (0, 1) for lang in languages}
+
+        for language in languages:
+            # If the JSON is structured as {lang: {key: text}}, use that
+            texts = all_texts.get(language, all_texts) if isinstance(all_texts, dict) else all_texts
+            if not isinstance(texts, dict):
+                self.logger.error(f"Invalid JSON structure for language '{language}'")
+                results[language] = (0, 1)
+                continue
+
+            audio_dir = self.output_dir / language / "audio"
+            tasks = []
+            for text_key, text_content in texts.items():
+                audio_filename = self.get_audio_filename(text_key, language)
+                output_path = audio_dir / audio_filename
+                task = self.generate_audio(text_content, output_path, language)
+                tasks.append(task)
+            res = await asyncio.gather(*tasks, return_exceptions=True)
+            successes = sum(1 for r in res if r is True)
+            failures = sum(1 for r in res if r is not True)
+            self.logger.info(f"Completed {language}: {successes} successful, {failures} failed")
+            results[language] = (successes, failures)
+
+        end_time = datetime.now()
+        duration = end_time - start_time
+        self.logger.info(f"TTS regeneration from JSON completed in {duration}")
+        return results

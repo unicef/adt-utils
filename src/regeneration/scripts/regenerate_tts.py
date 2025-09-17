@@ -18,11 +18,15 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Add project root to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from src.regeneration.classes.adt_tts_regenerator import ADTTSRegenerator
+
+
+load_dotenv(dotenv_path=Path(__file__).parent.parent.parent.parent / ".env")
 
 # Configure logging
 logging.basicConfig(
@@ -38,8 +42,8 @@ logger = logging.getLogger(__name__)
 async def main():
     parser = argparse.ArgumentParser(description="Regenerate TTS audio files using OpenAI API")
     parser.add_argument("target_dir", type=str, help="Target directory containing content/i18n")
-    parser.add_argument("--start-page", type=int, required=False, help="Starting page number (inclusive)")
-    parser.add_argument("--end-page", type=int, required=False, help="Ending page number (inclusive)")
+    parser.add_argument("--start-page", type=int, help="Starting page number (inclusive)")
+    parser.add_argument("--end-page", type=int, help="Ending page number (inclusive)")
     parser.add_argument("--language", type=str, required=True, help="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')")
     parser.add_argument("--input-json", type=str, help="Path to input JSON file containing text content (overrides HTML parsing)")
     parser.add_argument("--api-key", type=str, help="OpenAI API key (or set OPENAI_API_KEY env variable)")
@@ -57,21 +61,32 @@ async def main():
         logger.error("OpenAI API key must be provided via --api-key or OPENAI_API_KEY environment variable")
         return 1
 
-    # Validate page range
-    if args.start_page > args.end_page:
-        logger.error("Start page must be less than or equal to end page")
-        return 1
-
     # Parse languages from comma-separated string
     languages = [lang.strip() for lang in args.language.split(',') if lang.strip()]
     if not languages:
         logger.error("No valid languages specified. Use --language en,es or similar.")
         return 1
 
+    # Determine input mode and page range
+    if args.input_json:
+        input_json = args.input_json
+        start_page = None
+        end_page = None
+    else:
+        start_page = args.start_page if args.start_page is not None else 0
+        end_page = args.end_page if args.end_page is not None else 0
+        input_json = None
+        if start_page > end_page:
+            logger.error("Start page must be less than or equal to end page")
+            return 1
+
     # Run regeneration using the new class
     try:
-        regenerator = ADTTSRegenerator(api_key, output_dir=target_dir, logger=logger)
-        results = await regenerator.regenerate(args.start_page, args.end_page, languages)
+        regenerator = ADTTSRegenerator(api_key, output_dir=target_dir / "content/i18n", logger=logger)
+        if input_json:
+            results = await regenerator.regenerate_from_json(input_json, languages)
+        else:
+            results = await regenerator.regenerate(start_page, end_page, languages)
 
         # Print summary
         print("\n" + "="*50)

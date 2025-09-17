@@ -149,7 +149,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 description="Specific starting page to regenerate (empty for all pages)",
                 required=False,
                 show_in_ui=True,
-                default="",
+                default=None,
             ),
             ScriptArgument(
                 name="end-page",
@@ -157,7 +157,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 description="Specific ending page to regenerate (empty for all pages)",
                 required=False,
                 show_in_ui=True,
-                default="",
+                default=None,
             ),
             ScriptArgument(
                 name="languages",
@@ -168,7 +168,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 default=None,
             ),
             ScriptArgument(
-                name="input_json",
+                name="input-json",
                 type="str",
                 description="Path to input JSON file containing text content (overrides HTML parsing)",
                 required=False,

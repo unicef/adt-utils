@@ -16,6 +16,12 @@ import asyncio
 import os
 import argparse
 import logging
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
 from src.regeneration.classes.adt_tts_regenerator import ADTTSRegenerator
 
 # Configure logging
@@ -30,21 +36,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def main():
-    """Main function to parse arguments and run TTS regeneration."""
     parser = argparse.ArgumentParser(description="Regenerate TTS audio files using OpenAI API")
-    parser.add_argument("--start-page", type=int, required=True, 
-                       help="Starting page number (inclusive)")
-    parser.add_argument("--end-page", type=int, required=True,
-                       help="Ending page number (inclusive)")
-    parser.add_argument("--language", type=str, required=True,
-                       help="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')")
-    parser.add_argument("--input-json", type=str,
-                       help="Path to input JSON file containing text content (overrides HTML parsing)")
-    parser.add_argument("--api-key", type=str,
-                       help="OpenAI API key (or set OPENAI_API_KEY env variable)")
+    parser.add_argument("target_dir", type=str, help="Target directory containing content/i18n")
+    parser.add_argument("--start-page", type=int, required=False, help="Starting page number (inclusive)")
+    parser.add_argument("--end-page", type=int, required=False, help="Ending page number (inclusive)")
+    parser.add_argument("--language", type=str, required=True, help="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')")
+    parser.add_argument("--input-json", type=str, help="Path to input JSON file containing text content (overrides HTML parsing)")
+    parser.add_argument("--api-key", type=str, help="OpenAI API key (or set OPENAI_API_KEY env variable)")
 
     args = parser.parse_args()
-    
+
+    target_dir = Path(args.target_dir)
+    if not target_dir.exists():
+        print(f"Error: Target directory does not exist: {target_dir}", file=sys.stderr)
+        sys.exit(1)
+
     # Get API key
     api_key = args.api_key or os.getenv('OPENAI_API_KEY')
     if not api_key:
@@ -64,7 +70,7 @@ async def main():
 
     # Run regeneration using the new class
     try:
-        regenerator = ADTTSRegenerator(api_key, logger=logger)
+        regenerator = ADTTSRegenerator(api_key, output_dir=target_dir, logger=logger)
         results = await regenerator.regenerate(args.start_page, args.end_page, languages)
 
         # Print summary

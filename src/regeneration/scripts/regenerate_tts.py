@@ -36,10 +36,12 @@ async def main():
                        help="Starting page number (inclusive)")
     parser.add_argument("--end-page", type=int, required=True,
                        help="Ending page number (inclusive)")
-    parser.add_argument("--language", type=str,
-                       help="Language to regenerate (en,es)")
+    parser.add_argument("--language", type=str, required=True,
+                       help="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')")
     parser.add_argument("--input-json", type=str,
                        help="Path to input JSON file containing text content (overrides HTML parsing)")
+    parser.add_argument("--api-key", type=str,
+                       help="OpenAI API key (or set OPENAI_API_KEY env variable)")
 
     args = parser.parse_args()
     
@@ -54,11 +56,11 @@ async def main():
         logger.error("Start page must be less than or equal to end page")
         return 1
 
-    # Determine languages to process
-    if args.language == 'both':
-        languages = ['en', 'es']
-    else:
-        languages = [args.language]
+    # Parse languages from comma-separated string
+    languages = [lang.strip() for lang in args.language.split(',') if lang.strip()]
+    if not languages:
+        logger.error("No valid languages specified. Use --language en,es or similar.")
+        return 1
 
     # Run regeneration using the new class
     try:

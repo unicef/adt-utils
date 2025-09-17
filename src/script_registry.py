@@ -138,7 +138,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ScriptArgument(
                 name="target_dir",
                 type="str",
-                description="Target directory path containing HTML files to validate",
+                description="Target directory path containing HTML files for TTS regeneration",
                 required=True,
                 show_in_ui=False,
                 default=None,

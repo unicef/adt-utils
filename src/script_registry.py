@@ -191,6 +191,14 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 show_in_ui=False,
                 default=None,
             ),
+            ScriptArgument(
+                name="instruction",
+                type="str",
+                description="Custom instruction to override config/default for TTS generation",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
         ],
         examples=[
             ScriptExample(

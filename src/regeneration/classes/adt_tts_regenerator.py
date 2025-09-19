@@ -7,18 +7,42 @@ from openai import OpenAI
 from datetime import datetime
 import tempfile
 import os
+import yaml
 
 class ADTTTSRegenerator:
-    def __init__(self, openai_api_key: str, output_dir: Path = Path("content/i18n"), logger: logging.Logger = None):
+    def __init__(
+        self,
+        openai_api_key: str,
+        output_dir: Path = Path("content/i18n"),
+        logger: logging.Logger = None,
+        config_path: str = None,
+        custom_instruction: str = None,
+    ):
         self.api_key = openai_api_key
         self.client = OpenAI(api_key=openai_api_key)
         self.output_dir = output_dir
         self.max_concurrent_requests = 5
         self.semaphore = asyncio.Semaphore(self.max_concurrent_requests)
         self.logger = logger or logging.getLogger(__name__)
+        self.config = self.load_config(config_path) if config_path else {}
+        self.custom_instruction = custom_instruction
+
+    def load_config(self, config_path: str) -> dict:
+        if not config_path:
+            return {}
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                if config_path.endswith(".yaml") or config_path.endswith(".yml"):
+                    return yaml.safe_load(f)
+                elif config_path.endswith(".json"):
+                    return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Error loading config file: {e}")
+            return {}
 
     def load_texts(self, language: str) -> Dict[str, str]:
-        texts_file = self.output_dir / language / "texts.json"
+        base_language = self.get_base_language(language)
+        texts_file = self.output_dir / base_language / "texts.json"
         if not texts_file.exists():
             self.logger.error(f"Texts file not found: {texts_file}")
             return {}
@@ -65,22 +89,26 @@ class ADTTTSRegenerator:
         return filtered_texts
 
     def get_voice_and_instructions(self, language: str) -> Tuple[str, str]:
-        if language == 'es':
-            voice = "nova"
-            instructions = (
-                "Lee este texto como si fueras un maestro paciente y cálido "
-                "enseñando a niños. Usa el acento y entonación característica "
-                "de El Salvador, incluyendo la pronunciación suave y las "
-                "características fonéticas típicas de la región salvadoreña. "
-                "Mantén un tono educativo, amigable y accesible apropiado "
-                "para contenido educativo dirigido a niños."
-            )
+        # Split language code for accent
+        if "_" in language:
+            base, accent = language.split("_", 1)
         else:
-            voice = "alloy"
-            instructions = (
-                "Speak clearly with a warm, patient teacher tone "
-                "appropriate for educational content for children."
-            )
+            base, accent = language, None
+
+        config = self.config.get(base, {})
+        voice = config.get("voice", "alloy")
+        instructions = config.get("instructions", "Default instructions.")
+
+        # Accent-specific override
+        if accent and "accents" in config and accent in config["accents"]:
+            accent_cfg = config["accents"][accent]
+            voice = accent_cfg.get("voice", voice)
+            instructions = accent_cfg.get("instructions", instructions)
+
+        # Custom instruction override
+        if self.custom_instruction:
+            instructions = self.custom_instruction
+
         return voice, instructions
 
     async def generate_audio(self, text: str, output_path: Path, language: str) -> bool:
@@ -115,7 +143,8 @@ class ADTTTSRegenerator:
                 return False
 
     def get_audio_filename(self, text_key: str, language: str) -> str:
-        return f"{text_key}_{language}.mp3"
+        base_language = self.get_base_language(language)
+        return f"{text_key}_{base_language}.mp3"
 
     async def regenerate_for_language(self, language: str, start_page: int, end_page: int) -> Tuple[int, int]:
         self.logger.info(f"Starting regeneration for {language}, pages {start_page}-{end_page}")
@@ -126,7 +155,8 @@ class ADTTTSRegenerator:
         if not filtered_texts:
             self.logger.warning(f"No texts found for pages {start_page}-{end_page} in {language}")
             return 0, 0
-        audio_dir = self.output_dir / language / "audio"
+        base_language = self.get_base_language(language)
+        audio_dir = self.output_dir / base_language / "audio"
         tasks = []
         for text_key, text_content in filtered_texts.items():
             audio_filename = self.get_audio_filename(text_key, language)
@@ -220,8 +250,8 @@ class ADTTTSRegenerator:
                 self.logger.error(f"Invalid JSON structure for language '{language}'")
                 results[language] = (0, 1)
                 continue
-
-            audio_dir = self.output_dir / language / "audio"
+            base_language = self.get_base_language(language)
+            audio_dir = self.output_dir / base_language / "audio"
             tasks = []
             for text_key, text_content in texts.items():
                 audio_filename = self.get_audio_filename(text_key, language)
@@ -238,3 +268,6 @@ class ADTTTSRegenerator:
         duration = end_time - start_time
         self.logger.info(f"TTS regeneration from JSON completed in {duration}")
         return results
+
+    def get_base_language(self, language: str) -> str:
+        return language.split("_", 1)[0] if "_" in language else language

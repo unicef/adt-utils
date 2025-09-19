@@ -50,6 +50,8 @@ async def main():
     parser.add_argument("--input-json", type=str, help="Path to input JSON file containing text content (overrides HTML parsing)")
     parser.add_argument("--api-key", type=str, help="OpenAI API key (or set OPENAI_API_KEY env variable)")
     parser.add_argument("--data-ids", type=str, help="Comma-separated list of data IDs to regenerate (e.g. 'text-01-01,text-01-02')")
+    parser.add_argument("--config", type=str, default="configs/tts_config.yaml", help="Path to TTS config file (YAML/JSON)")
+    parser.add_argument("--instruction", type=str, help="Custom instruction to override config/default")
 
     args = parser.parse_args()
 
@@ -74,7 +76,13 @@ async def main():
     data_ids = [i.strip() for i in args.data_ids.split(',')] if args.data_ids else None
 
     try:
-        regenerator = ADTTTSRegenerator(api_key, output_dir=target_dir / "content/i18n", logger=logger)
+        regenerator = ADTTTSRegenerator(
+            api_key,
+            output_dir=target_dir / "content/i18n",
+            logger=logger,
+            config_path=args.config,
+            custom_instruction=args.instruction,
+        )
         results = await regenerator.regenerate(
             start_page=start_page,
             end_page=end_page,

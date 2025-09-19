@@ -107,7 +107,10 @@ class ADTTTSRegenerator:
 
         # Custom instruction override
         if self.custom_instruction:
-            instructions = self.custom_instruction
+            if isinstance(self.custom_instruction, dict):
+                instructions = self.custom_instruction.get(language, instructions)
+            else:
+                instructions = self.custom_instruction
 
         return voice, instructions
 

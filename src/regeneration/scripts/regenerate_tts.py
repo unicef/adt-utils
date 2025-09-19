@@ -75,13 +75,20 @@ async def main():
     input_json = args.input_json
     data_ids = [i.strip() for i in args.data_ids.split(',')] if args.data_ids else None
 
+    custom_instruction = None
+    if args.instruction:
+        try:
+            custom_instruction = json.loads(args.instruction)
+        except Exception:
+            custom_instruction = args.instruction  # fallback to single string
+
     try:
         regenerator = ADTTTSRegenerator(
             api_key,
             output_dir=target_dir / "content/i18n",
             logger=logger,
             config_path=args.config,
-            custom_instruction=args.instruction,
+            custom_instruction=custom_instruction,
         )
         results = await regenerator.regenerate(
             start_page=start_page,

@@ -1,5 +1,5 @@
 """Regeneration components."""
 
-from .classes import ADTTSRegenerator
+from .classes import ADTTTSRegenerator
 
-__all__ = ['ADTTSRegenerator']
+__all__ = ['ADTTTSRegenerator']

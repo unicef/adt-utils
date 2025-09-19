@@ -1,5 +1,5 @@
 """Production regeneration classes."""
 
-from .adt_tts_regenerator import ADTTSRegenerator
+from .adt_tts_regenerator import ADTTTSRegenerator
 
-__all__ = ['ADTTSRegenerator']
+__all__ = ['ADTTTSRegenerator']

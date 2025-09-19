@@ -164,7 +164,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="str",
                 description="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')",
                 required=True,
-                show_in_ui=True,
+                show_in_ui=False,
                 default=None,
             ),
             ScriptArgument(
@@ -179,6 +179,14 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 name="api-key",
                 type="str",
                 description="OpenAI API key (or set OPENAI_API_KEY env variable)",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="data-ids",
+                type="str",
+                description="Comma-separated list of data IDs to regenerate (e.g. 'text-01-01,text-01-02')",
                 required=False,
                 show_in_ui=False,
                 default=None,

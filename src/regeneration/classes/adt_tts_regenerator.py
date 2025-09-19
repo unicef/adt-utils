@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from openai import OpenAI
 from datetime import datetime
+import tempfile
+import os
 
-class ADTTSRegenerator:
+class ADTTTSRegenerator:
     def __init__(self, openai_api_key: str, output_dir: Path = Path("content/i18n"), logger: logging.Logger = None):
         self.api_key = openai_api_key
         self.client = OpenAI(api_key=openai_api_key)
@@ -137,7 +139,46 @@ class ADTTSRegenerator:
         self.logger.info(f"Completed {language}: {successes} successful, {failures} failed")
         return successes, failures
 
-    async def regenerate(self, start_page: int, end_page: int, languages: List[str]) -> Dict[str, Tuple[int, int]]:
+    async def regenerate(
+        self,
+        start_page: int = 0,
+        end_page: int = 0,
+        languages: List[str] = None,
+        input_json: str = None,
+        data_ids: List[str] = None,
+    ) -> Dict[str, Tuple[int, int]]:
+        """
+        Unified regeneration entry point.
+        - If input_json is provided, regenerate from JSON.
+        - If data_ids is provided, regenerate only those keys from texts.json.
+        - Otherwise, regenerate by page range.
+        """
+        languages = languages or []
+        results = {}
+
+        if input_json:
+            return await self.regenerate_from_json(input_json, languages)
+
+        if data_ids:
+            for language in languages:
+                texts = self.load_texts(language)
+                filtered_texts = {k: v for k, v in texts.items() if k in data_ids}
+                if not filtered_texts:
+                    self.logger.warning(f"No matching data IDs found for language '{language}'")
+                    results[language] = (0, 0)
+                    continue
+                with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as tmp_json:
+                    json.dump(filtered_texts, tmp_json, ensure_ascii=False, indent=2)
+                    tmp_json_path = tmp_json.name
+                lang_result = await self.regenerate_from_json(tmp_json_path, [language])
+                results.update(lang_result)
+                os.remove(tmp_json_path)
+            return results
+
+        # Default: regenerate by page range
+        return await self.regenerate_by_page_range(start_page, end_page, languages)
+
+    async def regenerate_by_page_range(self, start_page: int, end_page: int, languages: List[str]) -> Dict[str, Tuple[int, int]]:
         self.logger.info(f"Starting TTS regeneration for pages {start_page}-{end_page}, languages: {languages}")
         start_time = datetime.now()
         results = {}

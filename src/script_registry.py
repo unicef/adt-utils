@@ -164,7 +164,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="str",
                 description="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')",
                 required=True,
-                show_in_ui=False,
+                show_in_ui=True,
                 default=None,
             ),
             ScriptArgument(

@@ -127,6 +127,98 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ),
         ],
     ),
+    Script(
+        id="regenerate_tts",
+        name="ADT TTS Regenerator",
+        description="Regenerates TTS audio files for HTML content using OpenAI API",
+        path=str(os.path.join("src", "regeneration", "scripts", "regenerate_tts.py")),
+        category=ScriptCategory.REGENERATION,
+        production_ready=True,
+        arguments=[
+            ScriptArgument(
+                name="target_dir",
+                type="str",
+                description="Target directory containing content/i18n",
+                required=True,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="start-page",
+                type="int",
+                description="Starting page number (inclusive)",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="end-page",
+                type="int",
+                description="Ending page number (inclusive)",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="language",
+                type="str",
+                description="Comma-separated list of languages to regenerate (e.g. 'en', 'es', or 'en,es')",
+                required=True,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="input-json",
+                type="str",
+                description="Path to input JSON file containing text content (overrides HTML parsing)",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="api-key",
+                type="str",
+                description="OpenAI API key (or set OPENAI_API_KEY env variable)",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="data-ids",
+                type="str",
+                description="Comma-separated list of data IDs to regenerate (e.g. 'text-01-01,text-01-02')",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="instruction",
+                type="str",
+                description="Custom instruction to override config/default for TTS generation",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+        ],
+        examples=[
+            ScriptExample(
+                command="python3 {path} ./output --language en,es",
+                description="Regenerate the TTS of all strings in all HTML files in ./output directory into the output/audio folder in the desired languages",
+            ),
+            ScriptExample(
+                command="python3 {path} ./output --start-page 1 --end-page 10 --language en,es",
+                description="Regenerate TTS for pages 1-10 only",
+            ),
+            ScriptExample(
+                command="python3 {path} ./output --input-json changes.json --language es",
+                description="Regenerate TTS for texts specified in changes.json only, in Spanish",
+            ),
+            ScriptExample(
+                command="python3 {path} ./output --api-key sk-xxx --language en",
+                description="Regenerate TTS using a specific OpenAI API key",
+            ),
+        ],
+    ),
 ]
 
 

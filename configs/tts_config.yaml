@@ -1,0 +1,14 @@
+en:
+  voice: alloy
+  instructions: Speak clearly with a warm, patient teacher tone appropriate for educational content for children.
+
+es:
+  voice: nova
+  instructions: Lee este texto como si fueras un maestro paciente y cálido enseñando a niños.
+  accents:
+    uy:
+      instructions: Lee este texto con acento uruguayo, cálido y claro, apropiado para niños.
+    ar:
+      instructions: Lee este texto con acento argentino, amigable y claro, apropiado para niños.
+    py:
+      instructions: Lee este texto con acento paraguayo, paciente y claro, apropiado para niños.

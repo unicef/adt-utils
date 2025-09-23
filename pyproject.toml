@@ -9,21 +9,19 @@ authors = [
 license = "MIT"
 version = "1.0.0"
 requires-python = ">=3.8, <4.0"
+dependencies = [
+    "pydantic>=2.0.0",
+    "beautifulsoup4>=4.11.0",
+    "lxml>=4.9.0",
+    "openai",
+    "pyyaml>=6.0.0",
+]
 
 [project.urls]
 homepage = "https://github.com/unicef/adt-utils"
 repository = "https://github.com/unicef/adt-utils"
 documentation = "https://github.com/unicef/adt-utils/docs"
 
-# Production dependencies only
-[project.dependencies]
-prod = [
-    "pydantic>=2.0.0",
-    "beautifulsoup4>=4.11.0",
-    "lxml>=4.9.0",
-]
-
-# Experimental dependencies are in experiments/requirements.txt
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",

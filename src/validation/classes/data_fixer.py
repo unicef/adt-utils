@@ -96,7 +96,7 @@ class ADTDataFixer(DataFixer):
 
     def _log(self, message: str, force: bool = False):
         if self.verbose or force:
-            print(f"[ADTDataFixer] {message}")
+            print(f"[ADTDataFixer] {message}", flush=True)
 
     def process_page_range(self, config: PageProcessConfig, **kwargs) -> ProcessResult:
         """Process data fixing for a range of pages."""
@@ -268,8 +268,17 @@ class ADTDataFixer(DataFixer):
                 stderr=subprocess.PIPE,
                 check=False,
                 text=True,
+                timeout=300,
             )
         except FileNotFoundError:
+            self.prettier_command = None
+            self._html_files_to_format.clear()
+            return
+        except subprocess.TimeoutExpired:
+            self._log(
+                "Prettier formatting timed out after 300 seconds; disabling further formatting",
+                force=True,
+            )
             self.prettier_command = None
             self._html_files_to_format.clear()
             return

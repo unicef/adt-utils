@@ -141,6 +141,7 @@ class ADTDataFixer(DataFixer):
 
         for html_file in html_files:
             try:
+                self._log(f"Processing HTML file: {html_file}")
                 page_result = self.fix_page(
                     self.validator._extract_page_number(html_file), html_file
                 )
@@ -149,6 +150,9 @@ class ADTDataFixer(DataFixer):
                     if page_result.get("json_files_updated"):
                         json_files_updated.update(page_result["json_files_updated"])
                 result.processed_pages.append(page_result.get("page_number", 0))
+                self._log(
+                    f"Finished {html_file}: fixes={page_result.get('fixes', 0)}, updated_languages={page_result.get('json_files_updated', set())}"
+                )
             except Exception as e:
                 result.errors.append(f"Error fixing {html_file}: {str(e)}")
 

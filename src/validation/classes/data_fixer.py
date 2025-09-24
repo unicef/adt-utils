@@ -32,7 +32,8 @@ class ADTDataFixer(DataFixer):
         self.available_languages: Set[str] = set()
         self.language_updates: Dict[str, Set[str]] = {}
         self.verbose: bool = False
-        self.prettier_command: Optional[List[str]] = self._detect_prettier_command()
+        self.auto_format: bool = False
+        self.prettier_command: Optional[List[str]] = None
         self.prettier_batch_size: int = 50
         self._html_files_to_format: Set[Path] = set()
         self.formatted_files: Set[Path] = set()
@@ -88,12 +89,18 @@ class ADTDataFixer(DataFixer):
     def _detect_prettier_command(self) -> Optional[List[str]]:
         prettier_path = shutil.which("prettier")
         if prettier_path:
+            self._log(f"Detected Prettier executable at {prettier_path}")
             return [prettier_path, "--write"]
 
         npx_path = shutil.which("npx")
         if npx_path:
+            self._log(f"Detected npx at {npx_path}; will invoke Prettier via npx")
             return [npx_path, "prettier", "--write"]
 
+        self._log(
+            "Prettier command could not be located; HTML formatting will be skipped",
+            force=True,
+        )
         return None
 
     def _log(self, message: str, force: bool = False):
@@ -107,6 +114,7 @@ class ADTDataFixer(DataFixer):
             return ProcessResult(success=False, errors=errors)
 
         self.verbose = bool(getattr(config, 'verbose', False))
+        self.auto_format = bool(kwargs.get("auto_format", False))
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
         self._log(f"Starting data fixing in {target_dir}")
 
@@ -236,6 +244,14 @@ class ADTDataFixer(DataFixer):
             raise ProcessingError(f"Failed to fix page {page_number}: {str(e)}")
 
     def _format_pending_html_files(self, dry_run: bool):
+        if not self.auto_format:
+            if self._html_files_to_format and self.verbose:
+                self._log(
+                    "Skipping HTML formatting because --auto-format was not enabled"
+                )
+            self._html_files_to_format.clear()
+            return
+
         self._log(
             f"Preparing to format {len(self._html_files_to_format)} HTML file(s); dry_run={dry_run}"
         )
@@ -246,6 +262,9 @@ class ADTDataFixer(DataFixer):
                 )
             self._html_files_to_format.clear()
             return
+
+        if not self.prettier_command:
+            self.prettier_command = self._detect_prettier_command()
 
         if not self.prettier_command or not self._html_files_to_format:
             if not self.prettier_command and self._html_files_to_format:

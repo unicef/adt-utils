@@ -42,13 +42,13 @@ class ADTDataFixer(DataFixer):
                     "openai package is required to translate texts but is not installed"
                 )
             self.openai_client = OpenAI(api_key=self.openai_api_key)
-        
+
     def validate_config(self, config: PageProcessConfig) -> List[str]:
         """Validate configuration before processing."""
         errors = []
         if config.target_dir and not Path(config.target_dir).exists():
             errors.append(f"Target directory does not exist: {config.target_dir}")
-        
+
         # Check if i18n structure exists
         if config.target_dir:
             i18n_dir = Path(config.target_dir) / "content" / "i18n"
@@ -97,7 +97,7 @@ class ADTDataFixer(DataFixer):
         errors = self.validate_config(config)
         if errors:
             return ProcessResult(success=False, errors=errors)
-        
+
         result = ProcessResult(success=True)
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
 
@@ -111,34 +111,38 @@ class ADTDataFixer(DataFixer):
                     f"No language subdirectories found in {target_dir / 'content' / 'i18n'}"
                 ],
             )
-        
+
         # Find HTML files only in the root directory (not subdirectories)
         html_files = list(target_dir.glob("*.html"))
         if not html_files:
             return ProcessResult(success=False, errors=["No HTML files found"])
-        
+
         # Filter out non-content files (assets, tests, navigation, etc.)
         html_files = self.validator._filter_content_files(html_files)
-        
+
         # Filter by page range if specified
         if config.start_page != -1 or config.end_page != -1:
-            html_files = self.validator._filter_by_page_range(html_files, config.start_page, config.end_page)
-        
+            html_files = self.validator._filter_by_page_range(
+                html_files, config.start_page, config.end_page
+            )
+
         total_fixes = 0
         json_files_updated = set()
-        
+
         for html_file in html_files:
             try:
-                page_result = self.fix_page(self.validator._extract_page_number(html_file), html_file)
-                if page_result.get('fixes', 0) > 0:
-                    total_fixes += page_result['fixes']
-                    if page_result.get('json_files_updated'):
-                        json_files_updated.update(page_result['json_files_updated'])
-                result.processed_pages.append(page_result.get('page_number', 0))
+                page_result = self.fix_page(
+                    self.validator._extract_page_number(html_file), html_file
+                )
+                if page_result.get("fixes", 0) > 0:
+                    total_fixes += page_result["fixes"]
+                    if page_result.get("json_files_updated"):
+                        json_files_updated.update(page_result["json_files_updated"])
+                result.processed_pages.append(page_result.get("page_number", 0))
             except Exception as e:
                 result.errors.append(f"Error fixing {html_file}: {str(e)}")
 
-        self._format_pending_html_files(dry_run=kwargs.get('dry_run', False))
+        self._format_pending_html_files(dry_run=kwargs.get("dry_run", False))
 
         try:
             sync_updates = self._sync_missing_translations(target_dir)
@@ -148,14 +152,14 @@ class ADTDataFixer(DataFixer):
             result.success = False
 
         # Save updated JSON files
-        if json_files_updated and not kwargs.get('dry_run', False):
+        if json_files_updated and not kwargs.get("dry_run", False):
             self._save_json_files(target_dir, json_files_updated)
 
         result.metadata = {
-            'total_files': len(html_files),
-            'total_fixes': total_fixes,
-            'json_files_updated': len(json_files_updated),
-            'updated_languages': sorted(json_files_updated)
+            "total_files": len(html_files),
+            "total_fixes": total_fixes,
+            "json_files_updated": len(json_files_updated),
+            "updated_languages": sorted(json_files_updated),
         }
 
         added_translations = {
@@ -165,23 +169,23 @@ class ADTDataFixer(DataFixer):
         }
 
         if added_translations:
-            result.metadata['added_translations'] = added_translations
+            result.metadata["added_translations"] = added_translations
 
         if self.formatted_files:
-            result.metadata['formatted_files'] = [
+            result.metadata["formatted_files"] = [
                 str(path) for path in sorted(self.formatted_files, key=lambda p: str(p))
             ]
 
         return result
-    
+
     def fix_page(self, page_number: int, page_path: Path) -> Dict[str, Any]:
         """Fix issues in a single HTML page."""
         try:
-            with open(page_path, 'r', encoding='utf-8') as f:
+            with open(page_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            
-            soup = BeautifulSoup(content, 'html.parser')
-            
+
+            soup = BeautifulSoup(content, "html.parser")
+
             page_id = str(page_number) if page_number > 0 else "0"
 
             # Fix elements
@@ -196,20 +200,20 @@ class ADTDataFixer(DataFixer):
                     if did_fix:
                         fixes += 1
                         json_files_updated.update(updated_languages)
-            
+
             # Save HTML file if changes were made
             if fixes > 0:
-                with open(page_path, 'w', encoding='utf-8') as f:
+                with open(page_path, "w", encoding="utf-8") as f:
                     f.write(str(soup))
                 self._html_files_to_format.add(page_path)
-            
+
             return {
-                'page_number': page_number,
-                'file_path': str(page_path),
-                'fixes': fixes,
-                'json_files_updated': json_files_updated
+                "page_number": page_number,
+                "file_path": str(page_path),
+                "fixes": fixes,
+                "json_files_updated": json_files_updated,
             }
-            
+
         except Exception as e:
             raise ProcessingError(f"Failed to fix page {page_number}: {str(e)}")
 
@@ -247,70 +251,75 @@ class ADTDataFixer(DataFixer):
             self.prettier_command = None
 
         self._html_files_to_format.clear()
-    
+
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""
-        if not hasattr(element, 'name'):
+        if not hasattr(element, "name"):
             return False
-            
+
         # Skip these tags completely (don't process)
         if element.name.lower() in self.validator.skip_tags:
             return False
-        
+
         # Already has data-id, no need to fix
-        if element.get('data-id'):
+        if element.get("data-id"):
             return False
-        
+
         # Check for meaningful direct text
         direct_text = ""
         for content in element.contents:
-            if isinstance(content, NavigableString) and not isinstance(content, Comment):
+            if isinstance(content, NavigableString) and not isinstance(
+                content, Comment
+            ):
                 direct_text += str(content)
-        
+
         # Only fix if element has text content AND is not a container tag
-        return bool(direct_text.strip()) and element.name.lower() not in self.validator.container_tags
-    
+        return (
+            bool(direct_text.strip())
+            and element.name.lower() not in self.validator.container_tags
+        )
+
     def _load_json_file(self, target_dir: Path, lang_code: str):
         """Load and cache JSON file for a language."""
         if lang_code in self.json_cache:
             return
-        
+
         json_path = target_dir / "content" / "i18n" / lang_code / "texts.json"
-        
+
         if not json_path.exists():
             self.json_cache[lang_code] = {}
             self.json_reverse_cache[lang_code] = {}
             return
-        
+
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            
+
             # Create reverse mapping
             reverse_map = {}
             for key, value in data.items():
                 if isinstance(value, str) and key.startswith("text-"):
                     normalized_text = self._normalize_text(value)
                     reverse_map[normalized_text] = key
-            
+
             self.json_cache[lang_code] = data
             self.json_reverse_cache[lang_code] = reverse_map
-            
+
         except Exception:
             self.json_cache[lang_code] = {}
             self.json_reverse_cache[lang_code] = {}
-    
+
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison."""
         if not text:
             return ""
-        return ' '.join(text.strip().split())
+        return " ".join(text.strip().split())
 
     def _record_language_update(self, language: str, data_id: str):
         if not data_id:
             return
         self.language_updates.setdefault(language, set()).add(data_id)
-    
+
     def _find_existing_data_id(self, text: str) -> Optional[str]:
         """Find existing data-id for text in any language."""
         normalized_text = self._normalize_text(text)
@@ -329,7 +338,7 @@ class ADTDataFixer(DataFixer):
             for key in data.keys():
                 if key.startswith(pattern):
                     try:
-                        num_part = key[len(pattern):]
+                        num_part = key[len(pattern) :]
                         existing_nums.append(int(num_part))
                     except ValueError:
                         continue
@@ -402,7 +411,7 @@ class ADTDataFixer(DataFixer):
 
         try:
             response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-nano",
                 messages=[
                     {
                         "role": "system",
@@ -414,6 +423,7 @@ class ADTDataFixer(DataFixer):
                             f"Translate the following text to language code '{target_lang}'. "
                             "If the text is already in that language, return it unchanged. "
                             "Preserve numbers, HTML entities, placeholders, and formatting.\n\n"
+                            "Only return the translation, no other text or comments."
                             f"{text}"
                         ),
                     },
@@ -437,7 +447,7 @@ class ADTDataFixer(DataFixer):
 
         self.translation_cache[cache_key] = translated_text
         return translated_text
-    
+
     def _fix_element_data_id(
         self, element, page_id: str, target_dir: Path
     ) -> Tuple[bool, Set[str]]:
@@ -445,7 +455,9 @@ class ADTDataFixer(DataFixer):
         # Get element text
         direct_text = ""
         for content in element.contents:
-            if isinstance(content, NavigableString) and not isinstance(content, Comment):
+            if isinstance(content, NavigableString) and not isinstance(
+                content, Comment
+            ):
                 direct_text += str(content)
 
         text = self._normalize_text(direct_text)
@@ -467,7 +479,7 @@ class ADTDataFixer(DataFixer):
                     existing_data_id, text, missing_languages, target_dir
                 )
 
-            element['data-id'] = existing_data_id
+            element["data-id"] = existing_data_id
             return True, languages_updated
 
         incremental = self._get_next_incremental_id(page_id)
@@ -477,11 +489,11 @@ class ADTDataFixer(DataFixer):
             new_key, text, target_dir
         )
 
-        element['data-id'] = new_key
+        element["data-id"] = new_key
         return True, updated_languages
 
     def _select_source_translation(self, texts: Dict[str, str]) -> Tuple[str, str]:
-        preferred_order = ['es', 'en']
+        preferred_order = ["es", "en"]
         for lang in preferred_order:
             if lang in texts and self._normalize_text(texts[lang]):
                 return lang, texts[lang]
@@ -545,16 +557,16 @@ class ADTDataFixer(DataFixer):
                 languages_updated.add(language)
 
         return languages_updated
-    
+
     def _save_json_files(self, target_dir: Path, lang_codes: set):
         """Save updated JSON files."""
         for lang_code in lang_codes:
             json_path = target_dir / "content" / "i18n" / lang_code / "texts.json"
             json_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             try:
                 sorted_data = dict(sorted(self.json_cache[lang_code].items()))
-                with open(json_path, 'w', encoding='utf-8') as f:
+                with open(json_path, "w", encoding="utf-8") as f:
                     json.dump(sorted_data, f, ensure_ascii=False, indent=2)
             except Exception:
                 pass  # Continue with other files

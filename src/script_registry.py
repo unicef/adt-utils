@@ -116,7 +116,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 type="bool",
                 description="Format modified HTML files with Prettier after fixes",
                 required=False,
-                show_in_ui=False,
+                show_in_ui=True,
                 default=False,
             ),
         ],

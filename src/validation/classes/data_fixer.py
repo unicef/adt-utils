@@ -21,6 +21,27 @@ from ...core import DataFixer, PageProcessConfig, ProcessResult, ProcessingError
 from .adt_validator import ADTValidator
 
 
+TRANSLATION_PROMPT = """
+You are a professional translator. 
+You are given a text and a language code. Your task is to translate the text to the language code.
+
+Instructions:
+- Preserve placeholders, HTML entities, and meaning.
+- Only return the translation, no other text or comments.
+
+Note: some texts might be a single letter, symbols or emojis. Don't think about it, just translate it.
+
+The language code is "{target_lang}".
+
+The text to translate is:
+```
+{text}
+```
+
+Now, translate the text to the language code.
+"""
+
+
 class ADTDataFixer(DataFixer):
     """Production ADT data-id fixer."""
 
@@ -534,13 +555,7 @@ class ADTDataFixer(DataFixer):
                     },
                     {
                         "role": "user",
-                        "content": (
-                            f"Translate the following text to language code '{target_lang}'. "
-                            "If the text is already in that language, return it unchanged. "
-                            "Preserve numbers, HTML entities, placeholders, and formatting.\n\n"
-                            "Only return the translation, no other text or comments."
-                            f"{text}"
-                        ),
+                        "content": TRANSLATION_PROMPT.format(target_lang=target_lang, text=text),
                     },
                 ],
                 temperature=0.2,

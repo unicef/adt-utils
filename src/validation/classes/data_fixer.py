@@ -255,11 +255,41 @@ class ADTDataFixer(DataFixer):
             return
 
         files_to_format = sorted(self._html_files_to_format, key=lambda p: str(p))
-        command = [*self.prettier_command, *[str(path) for path in files_to_format]]
+        total_files = len(files_to_format)
+        if total_files == 0:
+            self._html_files_to_format.clear()
+            return
 
         self._log(
-            f"Running Prettier on {len(files_to_format)} file(s) with command: {' '.join(command)}"
+            f"Formatting {total_files} HTML file(s) with Prettier in batches of {self.prettier_batch_size}"
         )
+
+        success = True
+        for batch_index in range(0, total_files, self.prettier_batch_size):
+            batch = files_to_format[batch_index : batch_index + self.prettier_batch_size]
+            batch_number = (batch_index // self.prettier_batch_size) + 1
+            total_batches = (total_files + self.prettier_batch_size - 1) // self.prettier_batch_size
+            self._log(
+                f"Running Prettier batch {batch_number}/{total_batches} containing {len(batch)} file(s)"
+            )
+            if not self._run_prettier_batch(batch):
+                success = False
+                break
+
+        if not success:
+            self._log(
+                "Prettier formatting aborted; some files may remain unformatted", force=True
+            )
+
+        self._html_files_to_format.clear()
+
+    def _run_prettier_batch(self, files: List[Path]) -> bool:
+        if not self.prettier_command or not files:
+            return False
+
+        command = [*self.prettier_command, *[str(path) for path in files]]
+        self._log(f"Executing: {' '.join(command)}")
+        start_time = time.time()
 
         try:
             completed = subprocess.run(
@@ -272,38 +302,39 @@ class ADTDataFixer(DataFixer):
             )
         except FileNotFoundError:
             self.prettier_command = None
-            self._html_files_to_format.clear()
-            return
+            return False
         except subprocess.TimeoutExpired:
             self._log(
                 "Prettier formatting timed out after 300 seconds; disabling further formatting",
                 force=True,
             )
             self.prettier_command = None
-            self._html_files_to_format.clear()
-            return
+            return False
         except Exception:
             self._log("Unexpected error while running Prettier; skipping formatting", force=True)
-            self._html_files_to_format.clear()
-            return
+            return False
+
+        duration = time.time() - start_time
 
         if completed.returncode == 0:
-            self.formatted_files.update(files_to_format)
+            self.formatted_files.update(files)
             if completed.stdout.strip():
                 self._log(f"Prettier output:\n{completed.stdout.strip()}")
-            self._log("Prettier formatting completed successfully")
-        else:
             self._log(
-                f"Prettier exited with code {completed.returncode}; disabling formatting",
-                force=True,
+                f"Prettier formatted {len(files)} file(s) in {duration:.2f} seconds"
             )
-            if completed.stderr.strip():
-                self._log(
-                    f"Prettier error output:\n{completed.stderr.strip()}", force=True
-                )
-            self.prettier_command = None
+            return True
 
-        self._html_files_to_format.clear()
+        self._log(
+            f"Prettier exited with code {completed.returncode}; disabling formatting",
+            force=True,
+        )
+        if completed.stderr.strip():
+            self._log(
+                f"Prettier error output:\n{completed.stderr.strip()}", force=True
+            )
+        self.prettier_command = None
+        return False
 
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""

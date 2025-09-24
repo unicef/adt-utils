@@ -156,8 +156,6 @@ class ADTDataFixer(DataFixer):
             except Exception as e:
                 result.errors.append(f"Error fixing {html_file}: {str(e)}")
 
-        self._format_pending_html_files(dry_run=kwargs.get("dry_run", False))
-
         try:
             self._log("Synchronizing missing translations across languages")
             sync_updates = self._sync_missing_translations(target_dir)
@@ -169,6 +167,8 @@ class ADTDataFixer(DataFixer):
         # Save updated JSON files
         if json_files_updated and not kwargs.get("dry_run", False):
             self._save_json_files(target_dir, json_files_updated)
+
+        self._format_pending_html_files(dry_run=kwargs.get("dry_run", False))
 
         result.metadata = {
             "total_files": len(html_files),

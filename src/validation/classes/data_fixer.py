@@ -117,10 +117,17 @@ class ADTDataFixer(DataFixer):
             except Exception as e:
                 result.errors.append(f"Error fixing {html_file}: {str(e)}")
         
+        try:
+            sync_updates = self._sync_missing_translations(target_dir)
+            json_files_updated.update(sync_updates)
+        except Exception as exc:
+            result.errors.append(str(exc))
+            result.success = False
+
         # Save updated JSON files
         if json_files_updated and not kwargs.get('dry_run', False):
             self._save_json_files(target_dir, json_files_updated)
-        
+
         result.metadata = {
             'total_files': len(html_files),
             'total_fixes': total_fixes,
@@ -261,7 +268,10 @@ class ADTDataFixer(DataFixer):
             if data_id in self.json_cache.get(language, {}):
                 continue
 
-            translated_value = self._translate_text(base_text, language)
+            if not self._normalize_text(base_text):
+                translated_value = base_text
+            else:
+                translated_value = self._translate_text(base_text, language)
             self.json_cache[language][data_id] = translated_value
             normalized = self._normalize_text(translated_value)
             if language not in self.json_reverse_cache:
@@ -285,7 +295,10 @@ class ADTDataFixer(DataFixer):
             if new_key in self.json_cache.get(language, {}):
                 continue
 
-            translated_value = self._translate_text(base_text, language)
+            if not self._normalize_text(base_text):
+                translated_value = base_text
+            else:
+                translated_value = self._translate_text(base_text, language)
 
             self.json_cache[language][new_key] = translated_value
             normalized = self._normalize_text(translated_value)
@@ -386,6 +399,71 @@ class ADTDataFixer(DataFixer):
 
         element['data-id'] = new_key
         return True, updated_languages
+
+    def _select_source_translation(self, texts: Dict[str, str]) -> Tuple[str, str]:
+        preferred_order = ['es', 'en']
+        for lang in preferred_order:
+            if lang in texts and self._normalize_text(texts[lang]):
+                return lang, texts[lang]
+
+        for lang in sorted(texts.keys()):
+            if self._normalize_text(texts[lang]):
+                return lang, texts[lang]
+
+        # fallback to first entry (even if empty)
+        lang, text = next(iter(texts.items()))
+        return lang, text
+
+    def _sync_missing_translations(self, target_dir: Path) -> Set[str]:
+        languages = sorted(self.available_languages)
+        if not languages:
+            return set()
+
+        for language in languages:
+            self._ensure_language_loaded(target_dir, language)
+
+        all_keys: Set[str] = set()
+        for language in languages:
+            all_keys.update(self.json_cache.get(language, {}).keys())
+
+        languages_updated: Set[str] = set()
+
+        for data_id in all_keys:
+            existing_texts = {
+                language: self.json_cache.get(language, {}).get(data_id, "")
+                for language in languages
+                if data_id in self.json_cache.get(language, {})
+            }
+
+            if not existing_texts:
+                continue
+
+            source_lang, source_text = self._select_source_translation(existing_texts)
+
+            for language in languages:
+                cache = self.json_cache.setdefault(language, {})
+                reverse_cache = self.json_reverse_cache.setdefault(language, {})
+
+                if data_id in cache:
+                    normalized_existing = self._normalize_text(cache[data_id])
+                    if normalized_existing:
+                        reverse_cache[normalized_existing] = data_id
+                    continue
+
+                if not self._normalize_text(source_text):
+                    translated_value = source_text
+                elif language == source_lang:
+                    translated_value = source_text
+                else:
+                    translated_value = self._translate_text(source_text, language)
+
+                cache[data_id] = translated_value
+                normalized = self._normalize_text(translated_value)
+                if normalized:
+                    reverse_cache[normalized] = data_id
+                languages_updated.add(language)
+
+        return languages_updated
     
     def _save_json_files(self, target_dir: Path, lang_codes: set):
         """Save updated JSON files."""

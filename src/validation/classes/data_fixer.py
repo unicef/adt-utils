@@ -90,12 +90,12 @@ class ADTDataFixer(DataFixer):
         prettier_path = shutil.which("prettier")
         if prettier_path:
             self._log(f"Detected Prettier executable at {prettier_path}")
-            return [prettier_path, "--write"]
+            return [prettier_path, "--parser", "html", "--write"]
 
         npx_path = shutil.which("npx")
         if npx_path:
             self._log(f"Detected npx at {npx_path}; will invoke Prettier via npx")
-            return [npx_path, "prettier", "--write"]
+            return [npx_path, "prettier", "--parser", "html", "--write"]
 
         self._log(
             "Prettier command could not be located; HTML formatting will be skipped",

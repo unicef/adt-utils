@@ -25,7 +25,7 @@ class ADTDataFixer(DataFixer):
         self.validator = ADTValidator()
         self.json_cache: Dict[str, Dict[str, str]] = {}
         self.json_reverse_cache: Dict[str, Dict[str, str]] = {}
-        self.translation_cache: Dict[Tuple[str, str, str], str] = {}
+        self.translation_cache: Dict[Tuple[str, str], str] = {}
         self.available_languages: Set[str] = set()
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_client = None
@@ -82,6 +82,14 @@ class ADTDataFixer(DataFixer):
 
         self._reset_state()
         self._initialize_languages(target_dir)
+
+        if not self.available_languages:
+            return ProcessResult(
+                success=False,
+                errors=[
+                    f"No language subdirectories found in {target_dir / 'content' / 'i18n'}"
+                ],
+            )
         
         # Find HTML files only in the root directory (not subdirectories)
         html_files = list(target_dir.glob("*.html"))
@@ -117,7 +125,7 @@ class ADTDataFixer(DataFixer):
             'total_files': len(html_files),
             'total_fixes': total_fixes,
             'json_files_updated': len(json_files_updated),
-            'updated_languages': list(json_files_updated)
+            'updated_languages': sorted(json_files_updated)
         }
         
         return result
@@ -130,11 +138,7 @@ class ADTDataFixer(DataFixer):
             
             soup = BeautifulSoup(content, 'html.parser')
             
-            # Get language and page ID
-            lang_code = self._get_html_lang(soup)
             page_id = str(page_number) if page_number > 0 else "0"
-            
-            self._ensure_language_loaded(page_path.parent, lang_code)
 
             # Fix elements
             fixes = 0
@@ -143,7 +147,7 @@ class ADTDataFixer(DataFixer):
             for element in soup.find_all(True):
                 if self._should_fix_element(element):
                     did_fix, updated_languages = self._fix_element_data_id(
-                        element, lang_code, page_id, page_path.parent
+                        element, page_id, page_path.parent
                     )
                     if did_fix:
                         fixes += 1
@@ -186,13 +190,6 @@ class ADTDataFixer(DataFixer):
         # Only fix if element has text content AND is not a container tag
         return bool(direct_text.strip()) and element.name.lower() not in self.validator.container_tags
     
-    def _get_html_lang(self, soup) -> str:
-        """Extract language code from HTML."""
-        html_element = soup.find('html')
-        if html_element and html_element.get('lang'):
-            return html_element['lang']
-        return 'es'  # Default to Spanish
-    
     def _load_json_file(self, target_dir: Path, lang_code: str):
         """Load and cache JSON file for a language."""
         if lang_code in self.json_cache:
@@ -229,15 +226,19 @@ class ADTDataFixer(DataFixer):
             return ""
         return ' '.join(text.strip().split())
     
-    def _find_existing_data_id(self, text: str, lang_code: str) -> str:
-        """Find existing data-id for text."""
+    def _find_existing_data_id(self, text: str) -> Optional[str]:
+        """Find existing data-id for text in any language."""
         normalized_text = self._normalize_text(text)
-        return self.json_reverse_cache.get(lang_code, {}).get(normalized_text)
+        for reverse_map in self.json_reverse_cache.values():
+            data_id = reverse_map.get(normalized_text)
+            if data_id:
+                return data_id
+        return None
 
-    def _get_next_incremental_id(self, lang_code: str, page_id: str) -> int:
+    def _get_next_incremental_id(self, page_id: str) -> int:
         """Get next available incremental ID."""
         pattern = f"text-{page_id}-"
-        
+
         existing_nums = []
         for data in self.json_cache.values():
             for key in data.keys():
@@ -250,11 +251,31 @@ class ADTDataFixer(DataFixer):
 
         return max(existing_nums, default=-1) + 1
 
+    def _backfill_translations_for_key(
+        self, data_id: str, base_text: str, languages: Set[str], target_dir: Path
+    ) -> Set[str]:
+        languages_updated: Set[str] = set()
+
+        for language in languages:
+            self._ensure_language_loaded(target_dir, language)
+            if data_id in self.json_cache.get(language, {}):
+                continue
+
+            translated_value = self._translate_text(base_text, language)
+            self.json_cache[language][data_id] = translated_value
+            normalized = self._normalize_text(translated_value)
+            if language not in self.json_reverse_cache:
+                self.json_reverse_cache[language] = {}
+            if normalized:
+                self.json_reverse_cache[language][normalized] = data_id
+            languages_updated.add(language)
+
+        return languages_updated
+
     def _add_translations_for_new_key(
-        self, new_key: str, source_text: str, source_lang: str, target_dir: Path
+        self, new_key: str, base_text: str, target_dir: Path
     ) -> Set[str]:
         languages_to_update = set(self.available_languages)
-        languages_to_update.add(source_lang)
 
         for language in languages_to_update:
             self._ensure_language_loaded(target_dir, language)
@@ -264,10 +285,7 @@ class ADTDataFixer(DataFixer):
             if new_key in self.json_cache.get(language, {}):
                 continue
 
-            if language == source_lang:
-                translated_value = source_text
-            else:
-                translated_value = self._translate_text(source_text, source_lang, language)
+            translated_value = self._translate_text(base_text, language)
 
             self.json_cache[language][new_key] = translated_value
             normalized = self._normalize_text(translated_value)
@@ -279,16 +297,13 @@ class ADTDataFixer(DataFixer):
 
         return languages_updated
 
-    def _translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
-        if source_lang == target_lang:
-            return text
-
+    def _translate_text(self, text: str, target_lang: str) -> str:
         if not self.openai_client:
             raise ProcessingError(
                 "OpenAI API key is required to generate translations for other languages"
             )
 
-        cache_key = (source_lang, target_lang, text)
+        cache_key = (target_lang, text)
         if cache_key in self.translation_cache:
             return self.translation_cache[cache_key]
 
@@ -303,8 +318,9 @@ class ADTDataFixer(DataFixer):
                     {
                         "role": "user",
                         "content": (
-                            f"Translate the following text from {source_lang} to {target_lang}. "
-                            "Return only the translated text without additional commentary:\n\n"
+                            f"Translate the following text to language code '{target_lang}'. "
+                            "If the text is already in that language, return it unchanged. "
+                            "Preserve numbers, HTML entities, placeholders, and formatting.\n\n"
                             f"{text}"
                         ),
                     },
@@ -330,7 +346,7 @@ class ADTDataFixer(DataFixer):
         return translated_text
     
     def _fix_element_data_id(
-        self, element, lang_code: str, page_id: str, target_dir: Path
+        self, element, page_id: str, target_dir: Path
     ) -> Tuple[bool, Set[str]]:
         """Fix missing data-id for element."""
         # Get element text
@@ -344,17 +360,28 @@ class ADTDataFixer(DataFixer):
             return False, set()
 
         # Try to find existing data-id
-        existing_data_id = self._find_existing_data_id(text, lang_code)
+        existing_data_id = self._find_existing_data_id(text)
 
         if existing_data_id:
-            element['data-id'] = existing_data_id
-            return True, set()
+            missing_languages = {
+                language
+                for language in self.available_languages
+                if existing_data_id not in self.json_cache.get(language, {})
+            }
+            languages_updated = set()
+            if missing_languages:
+                languages_updated = self._backfill_translations_for_key(
+                    existing_data_id, text, missing_languages, target_dir
+                )
 
-        incremental = self._get_next_incremental_id(lang_code, page_id)
+            element['data-id'] = existing_data_id
+            return True, languages_updated
+
+        incremental = self._get_next_incremental_id(page_id)
         new_key = f"text-{page_id}-{incremental}"
 
         updated_languages = self._add_translations_for_new_key(
-            new_key, text, lang_code, target_dir
+            new_key, text, target_dir
         )
 
         element['data-id'] = new_key

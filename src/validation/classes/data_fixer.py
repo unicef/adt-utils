@@ -30,6 +30,7 @@ class ADTDataFixer(DataFixer):
         self.translation_cache: Dict[Tuple[str, str], str] = {}
         self.available_languages: Set[str] = set()
         self.language_updates: Dict[str, Set[str]] = {}
+        self.verbose: bool = False
         self.prettier_command: Optional[List[str]] = self._detect_prettier_command()
         self._html_files_to_format: Set[Path] = set()
         self.formatted_files: Set[Path] = set()
@@ -73,6 +74,7 @@ class ADTDataFixer(DataFixer):
 
         for lang_dir in i18n_dir.iterdir():
             if lang_dir.is_dir():
+                self._log(f"Discovered language directory: {lang_dir.name}")
                 self._ensure_language_loaded(target_dir, lang_dir.name)
 
     def _ensure_language_loaded(self, target_dir: Path, lang_code: str):
@@ -92,19 +94,27 @@ class ADTDataFixer(DataFixer):
 
         return None
 
+    def _log(self, message: str, force: bool = False):
+        if self.verbose or force:
+            print(f"[ADTDataFixer] {message}")
+
     def process_page_range(self, config: PageProcessConfig, **kwargs) -> ProcessResult:
         """Process data fixing for a range of pages."""
         errors = self.validate_config(config)
         if errors:
             return ProcessResult(success=False, errors=errors)
 
-        result = ProcessResult(success=True)
+        self.verbose = bool(getattr(config, 'verbose', False))
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
+        self._log(f"Starting data fixing in {target_dir}")
+
+        result = ProcessResult(success=True)
 
         self._reset_state()
         self._initialize_languages(target_dir)
 
         if not self.available_languages:
+            self._log("No languages detected; aborting data fixing", force=True)
             return ProcessResult(
                 success=False,
                 errors=[
@@ -145,6 +155,7 @@ class ADTDataFixer(DataFixer):
         self._format_pending_html_files(dry_run=kwargs.get("dry_run", False))
 
         try:
+            self._log("Synchronizing missing translations across languages")
             sync_updates = self._sync_missing_translations(target_dir)
             json_files_updated.update(sync_updates)
         except Exception as exc:
@@ -206,6 +217,7 @@ class ADTDataFixer(DataFixer):
                 with open(page_path, "w", encoding="utf-8") as f:
                     f.write(str(soup))
                 self._html_files_to_format.add(page_path)
+                self._log(f"Queued {page_path} for formatting")
 
             return {
                 "page_number": page_number,
@@ -218,16 +230,32 @@ class ADTDataFixer(DataFixer):
             raise ProcessingError(f"Failed to fix page {page_number}: {str(e)}")
 
     def _format_pending_html_files(self, dry_run: bool):
+        self._log(
+            f"Preparing to format {len(self._html_files_to_format)} HTML file(s); dry_run={dry_run}"
+        )
         if dry_run:
+            if self._html_files_to_format:
+                self._log(
+                    "Skipping HTML formatting because dry-run mode is enabled"
+                )
             self._html_files_to_format.clear()
             return
 
         if not self.prettier_command or not self._html_files_to_format:
+            if not self.prettier_command and self._html_files_to_format:
+                self._log(
+                    "Cannot format HTML files because Prettier command was not found",
+                    force=True,
+                )
             self._html_files_to_format.clear()
             return
 
         files_to_format = sorted(self._html_files_to_format, key=lambda p: str(p))
         command = [*self.prettier_command, *[str(path) for path in files_to_format]]
+
+        self._log(
+            f"Running Prettier on {len(files_to_format)} file(s) with command: {' '.join(command)}"
+        )
 
         try:
             completed = subprocess.run(
@@ -242,12 +270,24 @@ class ADTDataFixer(DataFixer):
             self._html_files_to_format.clear()
             return
         except Exception:
+            self._log("Unexpected error while running Prettier; skipping formatting", force=True)
             self._html_files_to_format.clear()
             return
 
         if completed.returncode == 0:
             self.formatted_files.update(files_to_format)
+            if completed.stdout.strip():
+                self._log(f"Prettier output:\n{completed.stdout.strip()}")
+            self._log("Prettier formatting completed successfully")
         else:
+            self._log(
+                f"Prettier exited with code {completed.returncode}; disabling formatting",
+                force=True,
+            )
+            if completed.stderr.strip():
+                self._log(
+                    f"Prettier error output:\n{completed.stderr.strip()}", force=True
+                )
             self.prettier_command = None
 
         self._html_files_to_format.clear()
@@ -517,6 +557,10 @@ class ADTDataFixer(DataFixer):
         all_keys: Set[str] = set()
         for language in languages:
             all_keys.update(self.json_cache.get(language, {}).keys())
+
+        self._log(
+            f"Checking {len(all_keys)} data-id key(s) across {len(languages)} language(s)"
+        )
 
         languages_updated: Set[str] = set()
 

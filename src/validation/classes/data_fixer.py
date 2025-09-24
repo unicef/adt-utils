@@ -31,6 +31,7 @@ class ADTDataFixer(DataFixer):
         self.available_languages: Set[str] = set()
         self.language_updates: Dict[str, Set[str]] = {}
         self.prettier_command: Optional[List[str]] = self._detect_prettier_command()
+        self._html_files_to_format: Set[Path] = set()
         self.formatted_files: Set[Path] = set()
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_client = None
@@ -62,6 +63,7 @@ class ADTDataFixer(DataFixer):
         self.translation_cache = {}
         self.available_languages = set()
         self.language_updates = {}
+        self._html_files_to_format = set()
         self.formatted_files = set()
 
     def _initialize_languages(self, target_dir: Path):
@@ -135,7 +137,9 @@ class ADTDataFixer(DataFixer):
                 result.processed_pages.append(page_result.get('page_number', 0))
             except Exception as e:
                 result.errors.append(f"Error fixing {html_file}: {str(e)}")
-        
+
+        self._format_pending_html_files(dry_run=kwargs.get('dry_run', False))
+
         try:
             sync_updates = self._sync_missing_translations(target_dir)
             json_files_updated.update(sync_updates)
@@ -197,8 +201,7 @@ class ADTDataFixer(DataFixer):
             if fixes > 0:
                 with open(page_path, 'w', encoding='utf-8') as f:
                     f.write(str(soup))
-                if self._format_html_file(page_path):
-                    self.formatted_files.add(page_path)
+                self._html_files_to_format.add(page_path)
             
             return {
                 'page_number': page_number,
@@ -210,11 +213,17 @@ class ADTDataFixer(DataFixer):
         except Exception as e:
             raise ProcessingError(f"Failed to fix page {page_number}: {str(e)}")
 
-    def _format_html_file(self, file_path: Path) -> bool:
-        if not self.prettier_command:
-            return False
+    def _format_pending_html_files(self, dry_run: bool):
+        if dry_run:
+            self._html_files_to_format.clear()
+            return
 
-        command = [*self.prettier_command, str(file_path)]
+        if not self.prettier_command or not self._html_files_to_format:
+            self._html_files_to_format.clear()
+            return
+
+        files_to_format = sorted(self._html_files_to_format, key=lambda p: str(p))
+        command = [*self.prettier_command, *[str(path) for path in files_to_format]]
 
         try:
             completed = subprocess.run(
@@ -226,14 +235,18 @@ class ADTDataFixer(DataFixer):
             )
         except FileNotFoundError:
             self.prettier_command = None
-            return False
+            self._html_files_to_format.clear()
+            return
         except Exception:
-            return False
+            self._html_files_to_format.clear()
+            return
 
-        if completed.returncode != 0:
-            return False
+        if completed.returncode == 0:
+            self.formatted_files.update(files_to_format)
+        else:
+            self.prettier_command = None
 
-        return True
+        self._html_files_to_format.clear()
     
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""

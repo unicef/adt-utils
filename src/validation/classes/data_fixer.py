@@ -4,6 +4,8 @@ Production data fixer implementation following standardized interfaces.
 
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -28,6 +30,8 @@ class ADTDataFixer(DataFixer):
         self.translation_cache: Dict[Tuple[str, str], str] = {}
         self.available_languages: Set[str] = set()
         self.language_updates: Dict[str, Set[str]] = {}
+        self.prettier_command: Optional[List[str]] = self._detect_prettier_command()
+        self.formatted_files: Set[Path] = set()
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_client = None
 
@@ -58,6 +62,7 @@ class ADTDataFixer(DataFixer):
         self.translation_cache = {}
         self.available_languages = set()
         self.language_updates = {}
+        self.formatted_files = set()
 
     def _initialize_languages(self, target_dir: Path):
         i18n_dir = target_dir / "content" / "i18n"
@@ -73,7 +78,18 @@ class ADTDataFixer(DataFixer):
             self._load_json_file(target_dir, lang_code)
         self.available_languages.add(lang_code)
         self.language_updates.setdefault(lang_code, set())
-    
+
+    def _detect_prettier_command(self) -> Optional[List[str]]:
+        prettier_path = shutil.which("prettier")
+        if prettier_path:
+            return [prettier_path, "--write"]
+
+        npx_path = shutil.which("npx")
+        if npx_path:
+            return [npx_path, "prettier", "--write"]
+
+        return None
+
     def process_page_range(self, config: PageProcessConfig, **kwargs) -> ProcessResult:
         """Process data fixing for a range of pages."""
         errors = self.validate_config(config)
@@ -147,6 +163,11 @@ class ADTDataFixer(DataFixer):
         if added_translations:
             result.metadata['added_translations'] = added_translations
 
+        if self.formatted_files:
+            result.metadata['formatted_files'] = [
+                str(path) for path in sorted(self.formatted_files, key=lambda p: str(p))
+            ]
+
         return result
     
     def fix_page(self, page_number: int, page_path: Path) -> Dict[str, Any]:
@@ -176,6 +197,8 @@ class ADTDataFixer(DataFixer):
             if fixes > 0:
                 with open(page_path, 'w', encoding='utf-8') as f:
                     f.write(str(soup))
+                if self._format_html_file(page_path):
+                    self.formatted_files.add(page_path)
             
             return {
                 'page_number': page_number,
@@ -186,6 +209,31 @@ class ADTDataFixer(DataFixer):
             
         except Exception as e:
             raise ProcessingError(f"Failed to fix page {page_number}: {str(e)}")
+
+    def _format_html_file(self, file_path: Path) -> bool:
+        if not self.prettier_command:
+            return False
+
+        command = [*self.prettier_command, str(file_path)]
+
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                text=True,
+            )
+        except FileNotFoundError:
+            self.prettier_command = None
+            return False
+        except Exception:
+            return False
+
+        if completed.returncode != 0:
+            return False
+
+        return True
     
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""

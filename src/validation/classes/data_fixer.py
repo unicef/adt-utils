@@ -3,10 +3,16 @@ Production data fixer implementation following standardized interfaces.
 """
 
 import json
-import re
+import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 from bs4 import BeautifulSoup, NavigableString, Comment
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 from ...core import DataFixer, PageProcessConfig, ProcessResult, ProcessingError
 from .adt_validator import ADTValidator
@@ -14,11 +20,22 @@ from .adt_validator import ADTValidator
 
 class ADTDataFixer(DataFixer):
     """Production ADT data-id fixer."""
-    
-    def __init__(self):
+
+    def __init__(self, openai_api_key: Optional[str] = None):
         self.validator = ADTValidator()
-        self.json_cache = {}
-        self.json_reverse_cache = {}
+        self.json_cache: Dict[str, Dict[str, str]] = {}
+        self.json_reverse_cache: Dict[str, Dict[str, str]] = {}
+        self.translation_cache: Dict[Tuple[str, str, str], str] = {}
+        self.available_languages: Set[str] = set()
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self.openai_client = None
+
+        if self.openai_api_key:
+            if OpenAI is None:
+                raise ProcessingError(
+                    "openai package is required to translate texts but is not installed"
+                )
+            self.openai_client = OpenAI(api_key=self.openai_api_key)
         
     def validate_config(self, config: PageProcessConfig) -> List[str]:
         """Validate configuration before processing."""
@@ -31,8 +48,28 @@ class ADTDataFixer(DataFixer):
             i18n_dir = Path(config.target_dir) / "content" / "i18n"
             if not i18n_dir.exists():
                 errors.append(f"I18n directory not found: {i18n_dir}")
-        
+
         return errors
+
+    def _reset_state(self):
+        self.json_cache = {}
+        self.json_reverse_cache = {}
+        self.translation_cache = {}
+        self.available_languages = set()
+
+    def _initialize_languages(self, target_dir: Path):
+        i18n_dir = target_dir / "content" / "i18n"
+        if not i18n_dir.exists():
+            return
+
+        for lang_dir in i18n_dir.iterdir():
+            if lang_dir.is_dir():
+                self._ensure_language_loaded(target_dir, lang_dir.name)
+
+    def _ensure_language_loaded(self, target_dir: Path, lang_code: str):
+        if lang_code not in self.json_cache:
+            self._load_json_file(target_dir, lang_code)
+        self.available_languages.add(lang_code)
     
     def process_page_range(self, config: PageProcessConfig, **kwargs) -> ProcessResult:
         """Process data fixing for a range of pages."""
@@ -42,6 +79,9 @@ class ADTDataFixer(DataFixer):
         
         result = ProcessResult(success=True)
         target_dir = Path(config.target_dir) if config.target_dir else Path.cwd()
+
+        self._reset_state()
+        self._initialize_languages(target_dir)
         
         # Find HTML files only in the root directory (not subdirectories)
         html_files = list(target_dir.glob("*.html"))
@@ -94,18 +134,20 @@ class ADTDataFixer(DataFixer):
             lang_code = self._get_html_lang(soup)
             page_id = str(page_number) if page_number > 0 else "0"
             
-            # Load JSON file
-            self._load_json_file(page_path.parent, lang_code)
-            
+            self._ensure_language_loaded(page_path.parent, lang_code)
+
             # Fix elements
             fixes = 0
-            json_files_updated = set()
-            
+            json_files_updated: Set[str] = set()
+
             for element in soup.find_all(True):
                 if self._should_fix_element(element):
-                    if self._fix_element_data_id(element, lang_code, page_id, page_path.parent):
+                    did_fix, updated_languages = self._fix_element_data_id(
+                        element, lang_code, page_id, page_path.parent
+                    )
+                    if did_fix:
                         fixes += 1
-                        json_files_updated.add(lang_code)
+                        json_files_updated.update(updated_languages)
             
             # Save HTML file if changes were made
             if fixes > 0:
@@ -191,52 +233,132 @@ class ADTDataFixer(DataFixer):
         """Find existing data-id for text."""
         normalized_text = self._normalize_text(text)
         return self.json_reverse_cache.get(lang_code, {}).get(normalized_text)
-    
+
     def _get_next_incremental_id(self, lang_code: str, page_id: str) -> int:
         """Get next available incremental ID."""
-        data = self.json_cache.get(lang_code, {})
         pattern = f"text-{page_id}-"
         
         existing_nums = []
-        for key in data.keys():
-            if key.startswith(pattern):
-                try:
-                    num_part = key[len(pattern):]
-                    existing_nums.append(int(num_part))
-                except ValueError:
-                    continue
-        
+        for data in self.json_cache.values():
+            for key in data.keys():
+                if key.startswith(pattern):
+                    try:
+                        num_part = key[len(pattern):]
+                        existing_nums.append(int(num_part))
+                    except ValueError:
+                        continue
+
         return max(existing_nums, default=-1) + 1
+
+    def _add_translations_for_new_key(
+        self, new_key: str, source_text: str, source_lang: str, target_dir: Path
+    ) -> Set[str]:
+        languages_to_update = set(self.available_languages)
+        languages_to_update.add(source_lang)
+
+        for language in languages_to_update:
+            self._ensure_language_loaded(target_dir, language)
+
+        languages_updated: Set[str] = set()
+        for language in languages_to_update:
+            if new_key in self.json_cache.get(language, {}):
+                continue
+
+            if language == source_lang:
+                translated_value = source_text
+            else:
+                translated_value = self._translate_text(source_text, source_lang, language)
+
+            self.json_cache[language][new_key] = translated_value
+            normalized = self._normalize_text(translated_value)
+            if language not in self.json_reverse_cache:
+                self.json_reverse_cache[language] = {}
+            if normalized:
+                self.json_reverse_cache[language][normalized] = new_key
+            languages_updated.add(language)
+
+        return languages_updated
+
+    def _translate_text(self, text: str, source_lang: str, target_lang: str) -> str:
+        if source_lang == target_lang:
+            return text
+
+        if not self.openai_client:
+            raise ProcessingError(
+                "OpenAI API key is required to generate translations for other languages"
+            )
+
+        cache_key = (source_lang, target_lang, text)
+        if cache_key in self.translation_cache:
+            return self.translation_cache[cache_key]
+
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a professional translator. Preserve placeholders, HTML entities, and meaning.",
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Translate the following text from {source_lang} to {target_lang}. "
+                            "Return only the translated text without additional commentary:\n\n"
+                            f"{text}"
+                        ),
+                    },
+                ],
+                temperature=0.2,
+            )
+        except Exception as exc:
+            raise ProcessingError(
+                f"Translation failed for language '{target_lang}': {exc}"
+            ) from exc
+
+        try:
+            translated_text = response.choices[0].message.content.strip()
+        except (AttributeError, IndexError, KeyError) as exc:
+            raise ProcessingError(
+                f"Unexpected translation response structure for language '{target_lang}'"
+            ) from exc
+
+        if not translated_text:
+            translated_text = text
+
+        self.translation_cache[cache_key] = translated_text
+        return translated_text
     
-    def _fix_element_data_id(self, element, lang_code: str, page_id: str, target_dir: Path) -> bool:
+    def _fix_element_data_id(
+        self, element, lang_code: str, page_id: str, target_dir: Path
+    ) -> Tuple[bool, Set[str]]:
         """Fix missing data-id for element."""
         # Get element text
         direct_text = ""
         for content in element.contents:
             if isinstance(content, NavigableString) and not isinstance(content, Comment):
                 direct_text += str(content)
-        
+
         text = self._normalize_text(direct_text)
         if not text:
-            return False
-        
+            return False, set()
+
         # Try to find existing data-id
         existing_data_id = self._find_existing_data_id(text, lang_code)
-        
+
         if existing_data_id:
             element['data-id'] = existing_data_id
-            return True
-        else:
-            # Create new data-id
-            incremental = self._get_next_incremental_id(lang_code, page_id)
-            new_key = f"text-{page_id}-{incremental}"
-            
-            # Add to cache
-            self.json_cache[lang_code][new_key] = text
-            self.json_reverse_cache[lang_code][self._normalize_text(text)] = new_key
-            
-            element['data-id'] = new_key
-            return True
+            return True, set()
+
+        incremental = self._get_next_incremental_id(lang_code, page_id)
+        new_key = f"text-{page_id}-{incremental}"
+
+        updated_languages = self._add_translations_for_new_key(
+            new_key, text, lang_code, target_dir
+        )
+
+        element['data-id'] = new_key
+        return True, updated_languages
     
     def _save_json_files(self, target_dir: Path, lang_codes: set):
         """Save updated JSON files."""

@@ -228,8 +228,9 @@ class ADTDataFixer(DataFixer):
 
             # Save HTML file if changes were made
             if fixes > 0:
+                rendered_html = self._render_html(soup)
                 with open(page_path, "w", encoding="utf-8") as f:
-                    f.write(str(soup))
+                    f.write(rendered_html)
                 self._html_files_to_format.add(page_path)
                 self._log(f"Queued {page_path} for formatting")
 
@@ -356,6 +357,15 @@ class ADTDataFixer(DataFixer):
             )
         self.prettier_command = None
         return False
+
+    def _render_html(self, soup: BeautifulSoup) -> str:
+        if not self.auto_format:
+            return str(soup)
+
+        try:
+            return soup.prettify()
+        except Exception:
+            return str(soup)
 
     def _should_fix_element(self, element) -> bool:
         """Check if element should be fixed (needs data-id)."""

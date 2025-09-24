@@ -32,6 +32,7 @@ class ADTDataFixer(DataFixer):
         self.language_updates: Dict[str, Set[str]] = {}
         self.verbose: bool = False
         self.prettier_command: Optional[List[str]] = self._detect_prettier_command()
+        self.prettier_batch_size: int = 50
         self._html_files_to_format: Set[Path] = set()
         self.formatted_files: Set[Path] = set()
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")

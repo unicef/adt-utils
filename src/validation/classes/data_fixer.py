@@ -27,6 +27,7 @@ class ADTDataFixer(DataFixer):
         self.json_reverse_cache: Dict[str, Dict[str, str]] = {}
         self.translation_cache: Dict[Tuple[str, str], str] = {}
         self.available_languages: Set[str] = set()
+        self.language_updates: Dict[str, Set[str]] = {}
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.openai_client = None
 
@@ -56,6 +57,7 @@ class ADTDataFixer(DataFixer):
         self.json_reverse_cache = {}
         self.translation_cache = {}
         self.available_languages = set()
+        self.language_updates = {}
 
     def _initialize_languages(self, target_dir: Path):
         i18n_dir = target_dir / "content" / "i18n"
@@ -70,6 +72,7 @@ class ADTDataFixer(DataFixer):
         if lang_code not in self.json_cache:
             self._load_json_file(target_dir, lang_code)
         self.available_languages.add(lang_code)
+        self.language_updates.setdefault(lang_code, set())
     
     def process_page_range(self, config: PageProcessConfig, **kwargs) -> ProcessResult:
         """Process data fixing for a range of pages."""
@@ -134,7 +137,16 @@ class ADTDataFixer(DataFixer):
             'json_files_updated': len(json_files_updated),
             'updated_languages': sorted(json_files_updated)
         }
-        
+
+        added_translations = {
+            language: sorted(data_ids)
+            for language, data_ids in self.language_updates.items()
+            if data_ids
+        }
+
+        if added_translations:
+            result.metadata['added_translations'] = added_translations
+
         return result
     
     def fix_page(self, page_number: int, page_path: Path) -> Dict[str, Any]:
@@ -232,6 +244,11 @@ class ADTDataFixer(DataFixer):
         if not text:
             return ""
         return ' '.join(text.strip().split())
+
+    def _record_language_update(self, language: str, data_id: str):
+        if not data_id:
+            return
+        self.language_updates.setdefault(language, set()).add(data_id)
     
     def _find_existing_data_id(self, text: str) -> Optional[str]:
         """Find existing data-id for text in any language."""
@@ -273,6 +290,7 @@ class ADTDataFixer(DataFixer):
             else:
                 translated_value = self._translate_text(base_text, language)
             self.json_cache[language][data_id] = translated_value
+            self._record_language_update(language, data_id)
             normalized = self._normalize_text(translated_value)
             if language not in self.json_reverse_cache:
                 self.json_reverse_cache[language] = {}
@@ -301,6 +319,7 @@ class ADTDataFixer(DataFixer):
                 translated_value = self._translate_text(base_text, language)
 
             self.json_cache[language][new_key] = translated_value
+            self._record_language_update(language, new_key)
             normalized = self._normalize_text(translated_value)
             if language not in self.json_reverse_cache:
                 self.json_reverse_cache[language] = {}
@@ -458,6 +477,7 @@ class ADTDataFixer(DataFixer):
                     translated_value = self._translate_text(source_text, language)
 
                 cache[data_id] = translated_value
+                self._record_language_update(language, data_id)
                 normalized = self._normalize_text(translated_value)
                 if normalized:
                     reverse_cache[normalized] = data_id

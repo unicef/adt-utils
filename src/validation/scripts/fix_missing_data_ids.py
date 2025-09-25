@@ -49,6 +49,8 @@ Workflow:
                         help='Preview changes without modifying files')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Show detailed information about each fix')
+    parser.add_argument('--auto-format', action='store_true',
+                        help='Format modified HTML files with Prettier after fixes')
     
     args = parser.parse_args()
     
@@ -74,7 +76,11 @@ Workflow:
     
     # Run data fixing
     fixer = ADTDataFixer()
-    result = fixer.process_page_range(config, dry_run=args.dry_run)
+    result = fixer.process_page_range(
+        config,
+        dry_run=args.dry_run,
+        auto_format=args.auto_format,
+    )
     
     # Output results
     if result.success:

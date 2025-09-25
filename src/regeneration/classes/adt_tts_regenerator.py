@@ -206,10 +206,22 @@ class ADTTTSRegenerator:
                 lang_result = await self.regenerate_from_json(tmp_json_path, [language])
                 results.update(lang_result)
                 os.remove(tmp_json_path)
+                self._update_audios_json(language, data_ids)
             return results
 
         # Default: regenerate by page range
         return await self.regenerate_by_page_range(start_page, end_page, languages)
+    
+    def _update_audios_json(self, language: str, data_ids: List[str]):
+        audios_file = self.output_dir / language / "audios.json"
+        if audios_file.exists():
+            with open(audios_file, "r", encoding="utf-8") as f:
+                audios = json.load(f)
+            for text_key in data_ids:
+                if text_key not in audios:
+                    audios[text_key] = f"{text_key}_{language}.mp3"
+        with open(audios_file, "w", encoding="utf-8") as f:
+            json.dump(audios, f, ensure_ascii=False, indent=2)
 
     async def regenerate_by_page_range(self, start_page: int, end_page: int, languages: List[str]) -> Dict[str, Tuple[int, int]]:
         self.logger.info(f"Starting TTS regeneration for pages {start_page}-{end_page}, languages: {languages}")

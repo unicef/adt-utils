@@ -111,6 +111,14 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 show_in_ui=True,
                 default=False,
             ),
+            ScriptArgument(
+                name="auto-format",
+                type="bool",
+                description="Format modified HTML files with Prettier after fixes",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
         ],
         examples=[
             ScriptExample(

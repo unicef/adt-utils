@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sys
+import html
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup, NavigableString
@@ -73,16 +74,16 @@ class HTMLTextOverrider:
         """Get list of HTML files to process, optionally filtered by page range using data-id attributes."""
         html_files = list(self.target_dir.glob("*.html"))
         
-        if start_page is not None or end_page is not None:
-            # Convert None to -1 for page_utils compatibility
-            start = -1 if start_page is None else start_page
-            end = -1 if end_page is None else end_page
-            
-            # Use the utility function instead of duplicated logic
-            html_files = filter_files_by_page_range(html_files, start, end, use_data_id=True)
+        # Use the utility function instead of duplicated filtering logic
+        filtered_files = filter_files_by_page_range(
+            files=html_files,
+            start_page=start_page or -1,
+            end_page=end_page or -1,
+            use_data_id=True
+        )
         
-        self.logger.info(f"Found {len(html_files)} HTML files to process")
-        return html_files
+        self.logger.info(f"Found {len(filtered_files)} HTML files to process")
+        return filtered_files
     
     def override_html_file(self, html_file: Path) -> Tuple[int, int]:
         """Override text content in a single HTML file for elements with txt_ or text- data-id attributes."""
@@ -114,10 +115,13 @@ class HTMLTextOverrider:
                         # Clear the element
                         element.clear()
                         
-                        # Check if new_text contains HTML markup
-                        if '<' in new_text and '>' in new_text:
+                        # Check if new_text contains HTML markup using BeautifulSoup
+                        temp_soup = BeautifulSoup(new_text, 'html.parser')
+                        has_html = any(getattr(node, 'name', None) is not None for node in temp_soup.contents)
+                        
+                        if has_html:
                             # Parse as HTML and insert the parsed content
-                            temp_soup = BeautifulSoup(new_text, 'html.parser')
+                            self.logger.debug(f"    Detected HTML markup in: {data_id}")
                             for content_node in temp_soup.contents:
                                 if isinstance(content_node, NavigableString):
                                     element.append(NavigableString(str(content_node)))
@@ -125,6 +129,7 @@ class HTMLTextOverrider:
                                     element.append(content_node)
                         else:
                             # Plain text - use NavigableString
+                            self.logger.debug(f"    Plain text content: {data_id}")
                             element.append(NavigableString(new_text))
                         
                         overrides_count += 1
@@ -159,7 +164,6 @@ class HTMLTextOverrider:
     def format_html(self, soup: BeautifulSoup) -> str:
         """Format HTML with prettify but preserve UTF-8 characters."""
         # Use prettify but then decode HTML entities back to UTF-8
-        import html
         
         formatted = soup.prettify(formatter='html5', encoding=None)
         

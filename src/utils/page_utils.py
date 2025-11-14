@@ -155,12 +155,15 @@ def filter_files_by_page_range(files: List[Path], start_page: int, end_page: int
             page_num = extract_page_number_from_data_id(file_path)
         else:
             page_num = extract_page_number(file_path)
+            # Convert 0 to None for consistent handling
+            page_num = None if page_num == 0 else page_num
             
+        # Consistent handling: files without detectable page numbers are always included
         if page_num is None:
-            # Include files without detectable page numbers
             filtered.append(file_path)
             continue
             
+        # Apply page range filtering
         if start_page != -1 and page_num < start_page:
             continue
         if end_page != -1 and page_num > end_page:

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup, NavigableString
+from src.utils.page_utils import filter_files_by_page_range, extract_page_number_from_data_id
 
 # Ensure UTF-8 encoding for stdout
 sys.stdout.reconfigure(encoding='utf-8')
@@ -68,62 +69,17 @@ class HTMLTextOverrider:
         except Exception as e:
             raise Exception(f"Error loading texts: {e}")
     
-    def extract_page_number_from_html_content(self, html_file: Path) -> Optional[int]:
-        """Extract page number from data-id attributes in HTML content."""
-        try:
-            with open(html_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            soup = BeautifulSoup(content, 'html.parser')
-            
-            # Find elements with data-id attributes that start with txt_ or text-
-            elements = soup.find_all(attrs={'data-id': re.compile(r'^(txt_|text-)')})
-            
-            for element in elements:
-                data_id = element.get('data-id')
-                
-                # Extract page number from patterns like txt_p56_g0_t0 or text-24-0
-                patterns = [
-                    r'txt_p(\d+)_',      # txt_p56_g0_t0 -> 56
-                    r'text-(\d+)-',      # text-24-0 -> 24
-                    r'txt_(\d+)_',       # txt_56_g0_t0 -> 56 (alternative pattern)
-                    r'text_(\d+)_',      # text_56_g0_t0 -> 56 (alternative pattern)
-                ]
-                
-                for pattern in patterns:
-                    match = re.search(pattern, data_id)
-                    if match:
-                        page_num = int(match.group(1))
-                        self.logger.debug(f"Extracted page {page_num} from data-id: {data_id}")
-                        return page_num
-            
-            self.logger.debug(f"No page number found in data-id attributes for {html_file.name}")
-            return None
-            
-        except Exception as e:
-            self.logger.debug(f"Could not extract page from HTML content {html_file.name}: {e}")
-            return None
-
     def get_html_files(self, start_page: Optional[int] = None, end_page: Optional[int] = None) -> List[Path]:
         """Get list of HTML files to process, optionally filtered by page range using data-id attributes."""
         html_files = list(self.target_dir.glob("*.html"))
         
         if start_page is not None or end_page is not None:
-            filtered_files = []
-            for html_file in html_files:
-                page_num = self.extract_page_number_from_html_content(html_file)
-                if page_num is not None:
-                    if start_page is not None and page_num < start_page:
-                        self.logger.debug(f"Skipping {html_file.name} (page {page_num} < {start_page})")
-                        continue
-                    if end_page is not None and page_num > end_page:
-                        self.logger.debug(f"Skipping {html_file.name} (page {page_num} > {end_page})")
-                        continue
-                    filtered_files.append(html_file)
-                else:
-                    self.logger.warning(f"Could not extract page number from {html_file.name}, including in processing")
-                    filtered_files.append(html_file)  # Include files without detectable page numbers
-            html_files = filtered_files
+            # Convert None to -1 for page_utils compatibility
+            start = -1 if start_page is None else start_page
+            end = -1 if end_page is None else end_page
+            
+            # Use the utility function instead of duplicated logic
+            html_files = filter_files_by_page_range(html_files, start, end, use_data_id=True)
         
         self.logger.info(f"Found {len(html_files)} HTML files to process")
         return html_files

@@ -8,6 +8,22 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from bs4 import BeautifulSoup
 
+# Compile regex patterns once at module level for better performance
+_FILENAME_PATTERNS = [
+    re.compile(r'page[\-_]?(\d+)', re.IGNORECASE),
+    re.compile(r'p(\d+)', re.IGNORECASE),
+    re.compile(r'(\d+)\.html?$', re.IGNORECASE)
+]
+
+_DATA_ID_FILTER_PATTERN = re.compile(r'^(txt_|text-)')
+
+_DATA_ID_PAGE_PATTERNS = [
+    re.compile(r'txt_p(\d+)_'),      # txt_p56_g0_t0 -> 56
+    re.compile(r'text-(\d+)-'),      # text-24-0 -> 24
+    re.compile(r'txt_(\d+)_'),       # txt_56_g0_t0 -> 56 (alternative pattern)
+    re.compile(r'text_(\d+)_'),      # text_56_g0_t0 -> 56 (alternative pattern)
+]
+
 
 def add_standard_args(parser: argparse.ArgumentParser = None) -> argparse.ArgumentParser:
     """
@@ -75,14 +91,8 @@ def extract_page_number(file_path: Path) -> int:
     Returns:
         Extracted page number or 0 if not found
     """
-    patterns = [
-        r'page[\-_]?(\d+)',
-        r'p(\d+)',
-        r'(\d+)\.html?$'
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, file_path.name, re.IGNORECASE)
+    for pattern in _FILENAME_PATTERNS:
+        match = pattern.search(file_path.name)
         if match:
             return int(match.group(1))
     
@@ -106,21 +116,14 @@ def extract_page_number_from_data_id(file_path: Path) -> Optional[int]:
         soup = BeautifulSoup(content, 'html.parser')
         
         # Find elements with data-id attributes that start with txt_ or text-
-        elements = soup.find_all(attrs={'data-id': re.compile(r'^(txt_|text-)')})
+        elements = soup.find_all(attrs={'data-id': _DATA_ID_FILTER_PATTERN})
         
         for element in elements:
             data_id = element.get('data-id')
             
-            # Extract page number from patterns like txt_p56_g0_t0 or text-24-0
-            patterns = [
-                r'txt_p(\d+)_',      # txt_p56_g0_t0 -> 56
-                r'text-(\d+)-',      # text-24-0 -> 24
-                r'txt_(\d+)_',       # txt_56_g0_t0 -> 56 (alternative pattern)
-                r'text_(\d+)_',      # text_56_g0_t0 -> 56 (alternative pattern)
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, data_id)
+            # Extract page number using pre-compiled patterns
+            for pattern in _DATA_ID_PAGE_PATTERNS:
+                match = pattern.search(data_id)
                 if match:
                     return int(match.group(1))
         

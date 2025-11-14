@@ -227,6 +227,74 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ),
         ],
     ),
+    Script(
+        id="language_flattening",
+        name="HTML Language Flattening",
+        description="Overrides HTML text content using translations from texts.json files based on config.json default language",
+        path=str(os.path.join("src", "language_flattening", "scripts", "language_flattening.py")),
+        category=ScriptCategory.FIXING,
+        production_ready=True,
+        arguments=[
+            ScriptArgument(
+                name="target_dir",
+                type="str",
+                description="Target directory containing HTML files and assets/content/config.json",
+                required=True,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="start-page",
+                type="int",
+                description="Starting page number (extracted from data-id attributes)",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="end-page",
+                type="int",
+                description="Ending page number (extracted from data-id attributes)",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="verbose",
+                type="bool",
+                description="Enable verbose output showing detailed processing information",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
+            ScriptArgument(
+                name="dry-run",
+                type="bool",
+                description="Show what would be changed without modifying files",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
+        ],
+        examples=[
+            ScriptExample(
+                command="python3 {path} ./target_directory",
+                description="Override all HTML files with default language texts from config.json",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_directory --start-page 50 --end-page 60",
+                description="Override HTML files for pages 50-60 only (based on data-id attributes)",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_directory --dry-run --verbose",
+                description="Preview changes with detailed output without modifying files",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_directory --verbose",
+                description="Override files with detailed logging output",
+            ),
+        ],
+    ),
 ]
 
 
@@ -325,16 +393,16 @@ def print_script_help(script: Script | None = None):
         print(f"Path: {script.path}")
         print(f"Category: {script.category}")
 
-        print(f"\nRequired Arguments:")
+        print("\nRequired Arguments:")
         for arg in script.arguments:
             print(f"  {arg.name} ({arg.type}): {arg.description}")
 
-        print(f"\nOptional Arguments:")
+        print("\nOptional Arguments:")
         for arg in script.arguments:
             default_str = f" [default: {arg.default}]" if arg.default else ""
             print(f"  {arg.name} ({arg.type}): {arg.description}{default_str}")
 
-        print(f"\nExamples:")
+        print("\nExamples:")
         for example in script.examples:
             cmd = example.command.format(path=script.path)
             print(f"  {cmd}")

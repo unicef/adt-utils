@@ -19,7 +19,6 @@ import logging
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
-import tempfile
 import json
 
 # Add project root to path for imports

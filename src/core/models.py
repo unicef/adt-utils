@@ -60,3 +60,21 @@ class TranslationConfig(PageProcessConfig):
         default=None, description="API key for translation service"
     )
     model: str = Field(default="gpt-4.1", description="Translation model to use")
+
+
+class TimecodeGenerationConfig(PageProcessConfig):
+    """Configuration for audio timecode generation operations."""
+
+    language: str = Field(description="Language code of the input audio")
+    api_key: Optional[str] = Field(
+        default=None, description="API key for transcription service"
+    )
+    model: str = Field(default="whisper-1", description="Transcription model to use")
+    dry_run: bool = Field(
+        default=False,
+        description="Preview generated files without writing output",
+    )
+    strict_data_ids: bool = Field(
+        default=True,
+        description="Require exact data-id matches from texts.json for each generated element",
+    )

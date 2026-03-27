@@ -295,6 +295,98 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ),
         ],
     ),
+    Script(
+        id="generate_timecodes",
+        name="ADT Audio Timecode Generator",
+        description="Generates timecode JSON files from ADT audio files using Whisper transcription",
+        path=str(
+            os.path.join(
+                "src", "timecode_generation", "scripts", "generate_timecodes.py"
+            )
+        ),
+        category=ScriptCategory.REGENERATION,
+        production_ready=True,
+        arguments=[
+            ScriptArgument(
+                name="target_dir",
+                type="str",
+                description="Root ADT directory containing content/i18n/{language}/audio",
+                required=True,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="language",
+                type="str",
+                description="Language code to process (for example: es, en)",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="start-page",
+                type="int",
+                description="Starting page number from audio filename prefix",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="end-page",
+                type="int",
+                description="Ending page number from audio filename prefix",
+                required=False,
+                show_in_ui=True,
+                default=None,
+            ),
+            ScriptArgument(
+                name="api-key",
+                type="str",
+                description="OpenAI API key (or set OPENAI_API_KEY env variable)",
+                required=False,
+                show_in_ui=False,
+                default=None,
+            ),
+            ScriptArgument(
+                name="model",
+                type="str",
+                description="OpenAI transcription model to use",
+                required=False,
+                show_in_ui=False,
+                default="whisper-1",
+            ),
+            ScriptArgument(
+                name="dry-run",
+                type="bool",
+                description="Preview output generation without writing files",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
+            ScriptArgument(
+                name="verbose",
+                type="bool",
+                description="Enable verbose output showing detailed processing information",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
+        ],
+        examples=[
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es",
+                description="Generate timecodes for all Spanish audio files",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --start-page 6 --end-page 20",
+                description="Generate timecodes for pages 6-20 only",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language en --dry-run --verbose",
+                description="Preview generation with verbose logs without writing files",
+            ),
+        ],
+    ),
 ]
 
 

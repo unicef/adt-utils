@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from bs4 import BeautifulSoup
 from openai import OpenAI
 
 from ...core import PageRangeProcessor, ProcessResult, TimecodeGenerationConfig
@@ -66,7 +67,8 @@ class AudioTimecodeGenerator(PageRangeProcessor):
 
         audio_dir = self._audio_dir_for_config(config)
         timecode_dir = self._timecode_dir_for_config(config)
-        texts_entries_by_page = self._load_text_entries_by_page(config)
+        texts_dict = self._load_texts_dict(config)
+        html_page_map = self._build_html_page_map(config.target_dir)
 
         files = self._find_audio_files(audio_dir)
         files = self._filter_audio_files_by_page_range(
@@ -87,12 +89,24 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 if page_number is not None:
                     seen_pages.add(page_number)
 
+                if page_id in html_page_map:
+                    page_text_entries = self._load_text_entries_from_html(
+                        html_page_map[page_id], texts_dict
+                    )
+                else:
+                    self.logger.warning(
+                        "No HTML found for page %s, falling back to texts.json", page_id
+                    )
+                    page_text_entries = self._load_text_entries_from_texts_dict(
+                        page_number, texts_dict
+                    )
+
                 payload = self._generate_timecode_payload(
                     audio_path=audio_path,
                     page_id=page_id,
                     page_number=page_number,
                     language=config.language,
-                    page_text_entries=texts_entries_by_page.get(page_number, []),
+                    page_text_entries=page_text_entries,
                     strict_data_ids=config.strict_data_ids,
                 )
 
@@ -121,9 +135,8 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             "language": config.language,
             "model": config.model,
             "strict_data_ids": config.strict_data_ids,
-            "texts_data_ids_loaded": sum(
-                len(entries) for entries in texts_entries_by_page.values()
-            ),
+            "texts_data_ids_loaded": len(texts_dict),
+            "html_pages_found": len(html_page_map),
         }
 
         if failed_files > 0:
@@ -249,6 +262,92 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             texts_json,
         )
         return grouped
+
+    def _load_texts_dict(self, config: TimecodeGenerationConfig) -> Dict[str, str]:
+        """Load texts.json as a flat data_id → text mapping."""
+        texts_json = (
+            Path(config.target_dir)
+            / "content"
+            / "i18n"
+            / config.language
+            / "texts.json"
+        )
+        if not texts_json.exists():
+            self.logger.warning("texts.json not found at %s", texts_json)
+            return {}
+        try:
+            with open(texts_json, "r", encoding="utf-8") as f:
+                texts = json.load(f)
+        except Exception as exc:
+            self.logger.warning("Failed to read texts.json at %s: %s", texts_json, exc)
+            return {}
+        if not isinstance(texts, dict):
+            return {}
+        return {
+            k: str(v) if v is not None else ""
+            for k, v in texts.items()
+            if isinstance(k, str)
+        }
+
+    def _build_html_page_map(self, target_dir: str) -> Dict[str, Path]:
+        """Scan root HTML files and build a page_id → html_path map via page-section-id meta."""
+        page_map: Dict[str, Path] = {}
+        for html_path in sorted(Path(target_dir).glob("*.html")):
+            try:
+                with open(html_path, "r", encoding="utf-8") as f:
+                    soup = BeautifulSoup(f, "html.parser")
+                meta = soup.find("meta", attrs={"name": "page-section-id"})
+                if meta and meta.get("content"):
+                    page_map[str(meta["content"])] = html_path
+            except Exception as exc:
+                self.logger.warning("Failed to read HTML %s: %s", html_path, exc)
+        self.logger.info("Found %d HTML pages in %s", len(page_map), target_dir)
+        return page_map
+
+    def _load_text_entries_from_html(
+        self,
+        html_path: Path,
+        texts_dict: Dict[str, str],
+    ) -> List[Dict[str, str]]:
+        """Extract text data-ids in DOM order from an HTML page, resolved against texts.json."""
+        try:
+            with open(html_path, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f, "html.parser")
+        except Exception as exc:
+            self.logger.warning("Failed to parse HTML %s: %s", html_path, exc)
+            return []
+
+        entries = []
+        seen: set = set()
+        for element in soup.find_all(attrs={"data-id": True}):
+            data_id = str(element.get("data-id", "")).strip()
+            if not data_id or data_id in seen:
+                continue
+            if self._extract_page_number_from_data_id(data_id) is None:
+                continue  # skip section IDs, aria IDs, img IDs, etc.
+            seen.add(data_id)
+            text = texts_dict.get(
+                data_id, element.get_text(separator=" ").strip()
+            )
+            entries.append({"id": data_id, "text": text})
+
+        self.logger.debug("Extracted %d text entries from %s", len(entries), html_path)
+        return entries
+
+    def _load_text_entries_from_texts_dict(
+        self,
+        page_number: Optional[int],
+        texts_dict: Dict[str, str],
+    ) -> List[Dict[str, str]]:
+        """Fallback: filter texts_dict by page number and return sorted entries."""
+        if page_number is None:
+            return []
+        entries = [
+            {"id": k, "text": v}
+            for k, v in texts_dict.items()
+            if self._extract_page_number_from_data_id(k) == page_number
+        ]
+        return sorted(entries, key=lambda e: self._data_id_sort_key(e["id"]))
 
     def _extract_page_number_from_data_id(self, data_id: str) -> Optional[int]:
         """Extract page number from data-id values like text-7-0 or txt_p63_g0_t0."""
@@ -475,8 +574,14 @@ class AudioTimecodeGenerator(PageRangeProcessor):
 
         return elements
 
+    @staticmethod
+    def _strip_html(text: str) -> str:
+        """Strip HTML tags and decode HTML entities from text."""
+        return BeautifulSoup(text, "html.parser").get_text()
+
     def _split_reference_words(self, text: str) -> List[str]:
-        return [token for token in text.split() if token]
+        clean = self._strip_html(text)
+        return [token for token in clean.split() if token]
 
     def _tokens_with_interpolated_timing(
         self,

@@ -364,6 +364,14 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 default=False,
             ),
             ScriptArgument(
+                name="non-strict-data-ids",
+                type="bool",
+                description="Allow generation when element count does not exactly match texts.json data-id count",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
+            ScriptArgument(
                 name="verbose",
                 type="bool",
                 description="Enable verbose output showing detailed processing information",
@@ -380,6 +388,10 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ScriptExample(
                 command="python3 {path} ./target_adt --language es --start-page 6 --end-page 20",
                 description="Generate timecodes for pages 6-20 only",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --non-strict-data-ids --verbose",
+                description="Generate timecodes allowing element/data-id count mismatches, with verbose logs",
             ),
             ScriptExample(
                 command="python3 {path} ./target_adt --language en --dry-run --verbose",

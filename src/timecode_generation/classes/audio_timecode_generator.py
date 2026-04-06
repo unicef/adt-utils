@@ -2,8 +2,11 @@
 
 import json
 import logging
+import re
+import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from bs4 import BeautifulSoup
 from openai import OpenAI
@@ -199,7 +202,8 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         page_text_entries: List[Dict[str, str]],
         strict_data_ids: bool,
     ) -> Dict[str, Any]:
-        transcription = self._transcribe_audio(audio_path, language)
+        initial_prompt = self._build_whisper_prompt(page_text_entries)
+        transcription = self._transcribe_audio(audio_path, language, initial_prompt=initial_prompt)
         return self._build_timecode_payload(
             page_id=page_id,
             page_number=page_number,
@@ -284,7 +288,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         if not isinstance(texts, dict):
             return {}
         return {
-            k: str(v) if v is not None else ""
+            k: unicodedata.normalize("NFC", str(v)) if v is not None else ""
             for k, v in texts.items()
             if isinstance(k, str)
         }
@@ -326,8 +330,9 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             if self._extract_page_number_from_data_id(data_id) is None:
                 continue  # skip section IDs, aria IDs, img IDs, etc.
             seen.add(data_id)
-            text = texts_dict.get(
-                data_id, element.get_text(separator=" ").strip()
+            text = unicodedata.normalize(
+                "NFC",
+                texts_dict.get(data_id, element.get_text(separator=" ").strip()),
             )
             entries.append({"id": data_id, "text": text})
 
@@ -382,7 +387,28 @@ class AudioTimecodeGenerator(PageRangeProcessor):
 
         return (2, data_id)
 
-    def _transcribe_audio(self, audio_path: Path, language: str) -> Dict[str, Any]:
+    def _build_whisper_prompt(
+        self,
+        page_text_entries: List[Dict[str, str]],
+        max_chars: int = 900,
+    ) -> str:
+        """Concatenate page reference texts as a Whisper prompt.
+
+        Guiding Whisper with the page vocabulary improves accent handling and
+        ensures numbers/proper nouns are transcribed in the expected form.
+        """
+        parts = [self._strip_html(e["text"]) for e in page_text_entries]
+        prompt = " ".join(parts)
+        if len(prompt) > max_chars:
+            prompt = prompt[:max_chars]
+        return prompt
+
+    def _transcribe_audio(
+        self,
+        audio_path: Path,
+        language: str,
+        initial_prompt: str = "",
+    ) -> Dict[str, Any]:
         transcription_language = self._transcription_language(language)
 
         with open(audio_path, "rb") as audio_file:
@@ -393,6 +419,8 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     language=transcription_language,
                     response_format="verbose_json",
                     timestamp_granularities=["segment", "word"],
+                    temperature=0,
+                    prompt=initial_prompt or None,
                 )
             except Exception:
                 audio_file.seek(0)
@@ -401,6 +429,8 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     file=audio_file,
                     language=transcription_language,
                     response_format="verbose_json",
+                    temperature=0,
+                    prompt=initial_prompt or None,
                 )
 
         if hasattr(response, "model_dump"):
@@ -493,29 +523,59 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         page_text_entries: List[Dict[str, str]],
         openai_words: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        token_lists = [
-            self._split_reference_words(entry["text"]) for entry in page_text_entries
-        ]
-        weights = [max(len(tokens), 1) for tokens in token_lists]
-        counts = self._allocate_counts(len(openai_words), weights)
+        ordered, boundaries, reliable = self._reorder_entries_by_audio(
+            page_text_entries, openai_words
+        )
+
+        if not reliable:
+            self.logger.debug(
+                "Audio alignment score too low — using DOM order with proportional allocation"
+            )
+            ordered = page_text_entries
+            token_lists = [self._split_reference_words(e["text"]) for e in ordered]
+            weights = [max(len(t), 1) for t in token_lists]
+            counts = self._allocate_counts(len(openai_words), weights)
+            boundaries_list: List[int] = [0]
+            c = 0
+            for count in counts[:-1]:
+                c += count
+                boundaries_list.append(c)
+        else:
+            token_lists = [self._split_reference_words(e["text"]) for e in ordered]
+            boundaries_list = [0] + boundaries[1:]
 
         elements: List[Dict[str, Any]] = []
-        cursor = 0
         previous_end = openai_words[0]["start"] if openai_words else 0.0
 
-        for entry, tokens, count in zip(page_text_entries, token_lists, counts):
-            assigned = openai_words[cursor : cursor + count]
-            cursor += count
+        for i, (entry, tokens) in enumerate(zip(ordered, token_lists)):
+            w_start = boundaries_list[i]
+            w_end = (
+                boundaries_list[i + 1]
+                if i + 1 < len(boundaries_list)
+                else len(openai_words)
+            )
+            assigned = openai_words[w_start:w_end]
+
+            # Element end = start of the next boundary word (continuous coverage).
+            # This gives trailing unmatched tokens the full gap to fill, not just
+            # until the last assigned Whisper word.
+            if w_end < len(openai_words):
+                element_time_end = float(openai_words[w_end]["start"])
+            else:
+                element_time_end = float(openai_words[-1]["end"]) if openai_words else 0.0
 
             if assigned:
                 start = float(assigned[0]["start"])
-                end = float(assigned[-1]["end"])
+                end = element_time_end
                 previous_end = end
+                word_timestamps = self._align_tokens_to_whisper_words(
+                    tokens, assigned, time_window_end=element_time_end
+                )
             else:
                 start = previous_end
                 end = previous_end
-
-            word_timestamps = self._tokens_with_interpolated_timing(tokens, start, end)
+                word_timestamps = self._tokens_with_interpolated_timing(tokens, start, end)
+            word_timestamps = self._enforce_word_monotonicity(word_timestamps)
             elements.append(
                 {
                     "id": entry["id"],
@@ -526,6 +586,95 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             )
 
         return elements
+
+    def _reorder_entries_by_audio(
+        self,
+        page_text_entries: List[Dict[str, str]],
+        whisper_words: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, str]], List[int], bool]:
+        """Return (ordered_entries, boundary_positions, reliable).
+
+        Finds where each entry's text appears in the Whisper word sequence via
+        sliding-window alignment, then sorts entries by that position. If the
+        match quality is too low to be trusted, returns reliable=False so the
+        caller can fall back to proportional allocation.
+        """
+        if len(page_text_entries) <= 1 or not whisper_words:
+            return page_text_entries, [0], True
+
+        whisper_normalized = [
+            self._normalize_token(w["text"]) for w in whisper_words
+        ]
+
+        ranked: List[Tuple[int, float, Dict[str, str]]] = []
+        for entry in page_text_entries:
+            tokens = [
+                self._normalize_token(t)
+                for t in self._split_reference_words(entry["text"])
+            ]
+            pos, score = self._find_best_whisper_match(tokens, whisper_normalized)
+            ranked.append((pos, score, entry))
+
+        ranked.sort(key=lambda x: x[0])
+
+        min_score = min(r[1] for r in ranked)
+        positions_unique = len({r[0] for r in ranked}) == len(ranked)
+        reliable = min_score >= 0.2 and positions_unique
+
+        ordered = [r[2] for r in ranked]
+        boundaries = [r[0] for r in ranked]
+        return ordered, boundaries, reliable
+
+    @staticmethod
+    def _find_best_whisper_match(
+        entry_tokens: List[str],
+        whisper_normalized: List[str],
+    ) -> Tuple[int, float]:
+        """Slide a window over the Whisper word list and return the position and
+        normalized score of the best-matching window for the given entry tokens.
+
+        Multiplying ratio by len(entry_tokens) ensures a 10-word perfect match
+        outscores a 1-word coincidental match.
+        """
+        n = len(entry_tokens)
+        if not n or not whisper_normalized:
+            return 0, 0.0
+
+        best_pos = 0
+        best_score = 0.0
+        window_extra = max(2, n // 2)
+
+        for start in range(len(whisper_normalized)):
+            window = whisper_normalized[start : start + n + window_extra]
+            if not window:
+                break
+            raw = SequenceMatcher(None, entry_tokens, window).ratio()
+            score = raw * n
+            if score > best_score:
+                best_score = score
+                best_pos = start
+
+        normalized = best_score / n if n else 0.0
+        return best_pos, normalized
+
+    @staticmethod
+    def _strip_diacritics(text: str) -> str:
+        """Remove combining diacritic characters via NFD decomposition."""
+        return "".join(
+            ch for ch in unicodedata.normalize("NFD", text)
+            if unicodedata.category(ch) != "Mn"
+        )
+
+    @staticmethod
+    def _normalize_token(token: str) -> str:
+        """Lowercase, strip punctuation, and strip diacritics for robust comparison.
+
+        Whisper often drops accents for Spanish (está → esta), so stripping
+        diacritics from both sides prevents spurious mismatches.
+        """
+        lowered = token.lower()
+        no_punct = re.sub(r'[^\w\s]', '', lowered, flags=re.UNICODE).strip()
+        return AudioTimecodeGenerator._strip_diacritics(no_punct)
 
     def _build_elements_from_time_window(
         self,
@@ -582,6 +731,107 @@ class AudioTimecodeGenerator(PageRangeProcessor):
     def _split_reference_words(self, text: str) -> List[str]:
         clean = self._strip_html(text)
         return [token for token in clean.split() if token]
+
+    def _align_tokens_to_whisper_words(
+        self,
+        tokens: List[str],
+        whisper_words: List[Dict[str, Any]],
+        time_window_end: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Map reference text tokens to actual Whisper word timestamps.
+
+        Uses SequenceMatcher to align tokens against the Whisper words.
+        Matched tokens get the real Whisper timestamp; unmatched tokens
+        (punctuation variants, elisions, etc.) are interpolated linearly
+        between their neighbouring anchor points.
+
+        time_window_end: if provided, trailing unmatched tokens spread into
+        the window [last_anchor_end, time_window_end] rather than collapsing
+        to a zero-duration point.  Prevents trailing words from being skipped
+        by the tts_highlighter's strict `currentTime < element.end` check.
+        """
+        if not tokens:
+            return []
+        if not whisper_words:
+            return self._tokens_with_interpolated_timing(tokens, 0.0, 0.0)
+
+        global_start = float(whisper_words[0]["start"])
+        global_end = (
+            time_window_end
+            if time_window_end is not None
+            else float(whisper_words[-1]["end"])
+        )
+
+        ref_norm = [self._normalize_token(t) for t in tokens]
+        wh_norm = [self._normalize_token(w["text"]) for w in whisper_words]
+
+        # Build anchor map: token_index → (start, end) from matched Whisper word
+        anchors: Dict[int, Tuple[float, float]] = {}
+        for a, b, size in SequenceMatcher(None, ref_norm, wh_norm).get_matching_blocks():
+            for k in range(size):
+                anchors[a + k] = (
+                    float(whisper_words[b + k]["start"]),
+                    float(whisper_words[b + k]["end"]),
+                )
+
+        # Fill in timings for all tokens; interpolate linearly across gaps
+        timings: List[Optional[Tuple[float, float]]] = [None] * len(tokens)
+        for idx, timing in anchors.items():
+            timings[idx] = timing
+
+        i = 0
+        while i < len(tokens):
+            if timings[i] is not None:
+                i += 1
+                continue
+            # Locate the gap boundaries
+            prev_end = global_start
+            for p in range(i - 1, -1, -1):
+                if timings[p] is not None:
+                    prev_end = timings[p][1]
+                    break
+            next_start = global_end
+            gap_end = len(tokens)
+            for n in range(i, len(tokens)):
+                if timings[n] is not None:
+                    next_start = timings[n][0]
+                    gap_end = n
+                    break
+            gap_len = gap_end - i
+            duration = next_start - prev_end
+            # Use a minimum 0.2 s/token so trailing unmatched tokens never
+            # collapse to the same timestamp and become un-highlightable.
+            step = duration / gap_len if (gap_len > 0 and duration > 0) else 0.2
+            for j in range(gap_len):
+                timings[i + j] = (prev_end + j * step, prev_end + (j + 1) * step)
+            i = gap_end
+
+        return [
+            {
+                "text": token,
+                "start": round(cast(Tuple[float, float], t)[0], 3),
+                "end": round(cast(Tuple[float, float], t)[1], 3),
+            }
+            for token, t in zip(tokens, timings)
+        ]
+
+    @staticmethod
+    def _enforce_word_monotonicity(
+        word_timestamps: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Clamp word timestamps so start times are non-decreasing and start <= end.
+
+        tts_highlighter.js scans backwards to find the last word where
+        currentTime >= word.start, so non-monotone timestamps cause stale highlights.
+        """
+        result = []
+        prev_end = 0.0
+        for word in word_timestamps:
+            start = max(float(word["start"]), prev_end)
+            end = max(float(word["end"]), start)
+            result.append({"text": word["text"], "start": round(start, 3), "end": round(end, 3)})
+            prev_end = end
+        return result
 
     def _tokens_with_interpolated_timing(
         self,

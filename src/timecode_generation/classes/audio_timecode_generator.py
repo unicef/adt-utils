@@ -594,10 +594,18 @@ class AudioTimecodeGenerator(PageRangeProcessor):
     ) -> Tuple[List[Dict[str, str]], List[int], bool]:
         """Return (ordered_entries, boundary_positions, reliable).
 
-        Finds where each entry's text appears in the Whisper word sequence via
-        sliding-window alignment, then sorts entries by that position. If the
-        match quality is too low to be trusted, returns reliable=False so the
-        caller can fall back to proportional allocation.
+        Two-pass alignment:
+
+        Pass 1 — find each entry's best unconstrained anchor to determine
+        audio order (handles pages where DOM order ≠ reading order).
+
+        Pass 2 — re-anchor each entry sequentially. Entry N's search starts
+        at (previous anchor + previous entry's token count), so two entries
+        that share a rare word (e.g. "Guazubirá" appearing in both) cannot
+        both anchor to the same early window. Without this constraint the
+        second entry's boundary would land inside the first entry's word span,
+        causing the element end-time to be set before some of its own words
+        are spoken, making those words unhighlightable.
         """
         if len(page_text_entries) <= 1 or not whisper_words:
             return page_text_entries, [0], True
@@ -606,16 +614,33 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             self._normalize_token(w["text"]) for w in whisper_words
         ]
 
-        ranked: List[Tuple[int, float, Dict[str, str]]] = []
+        # Pass 1: unconstrained anchor per entry → determines audio order
+        raw: List[Tuple[int, float, Dict[str, str]]] = []
         for entry in page_text_entries:
             tokens = [
                 self._normalize_token(t)
                 for t in self._split_reference_words(entry["text"])
             ]
             pos, score = self._find_best_whisper_match(tokens, whisper_normalized)
-            ranked.append((pos, score, entry))
+            raw.append((pos, score, entry))
 
-        ranked.sort(key=lambda x: x[0])
+        raw.sort(key=lambda x: x[0])
+
+        # Pass 2: sequential re-anchor — each entry starts after the
+        # previous entry's matched span (anchor + token count).
+        ranked: List[Tuple[int, float, Dict[str, str]]] = []
+        search_from = 0
+        for _, _, entry in raw:
+            tokens = [
+                self._normalize_token(t)
+                for t in self._split_reference_words(entry["text"])
+            ]
+            rel_pos, score = self._find_best_whisper_match(
+                tokens, whisper_normalized[search_from:]
+            )
+            abs_pos = search_from + rel_pos
+            ranked.append((abs_pos, score, entry))
+            search_from = abs_pos + max(len(tokens), 1)
 
         min_score = min(r[1] for r in ranked)
         positions_unique = len({r[0] for r in ranked}) == len(ranked)

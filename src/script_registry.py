@@ -298,7 +298,7 @@ PRODUCTION_SCRIPTS: List[Script] = [
     Script(
         id="generate_timecodes",
         name="ADT Audio Timecode Generator",
-        description="Generates timecode JSON files from ADT audio files using Whisper transcription",
+        description="Generates timecode JSON files from ADT audio files using Whisper transcription. Existing output files with \"locked\": true at the top level are preserved across re-runs so hand-corrections are not overwritten.",
         path=str(
             os.path.join(
                 "src", "timecode_generation", "scripts", "generate_timecodes.py"
@@ -350,10 +350,18 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ScriptArgument(
                 name="model",
                 type="str",
-                description="OpenAI transcription model to use",
+                description="OpenAI transcription model to use. whisper-1 (default) returns word-level timestamps. gpt-4o-transcribe has no timestamps and falls back to proportional allocation via ffprobe.",
                 required=False,
                 show_in_ui=False,
                 default="whisper-1",
+            ),
+            ScriptArgument(
+                name="text-model",
+                type="str",
+                description="Optional hybrid mode. Fetch text content from this model (e.g. gpt-4o-transcribe) and word timings from --model (e.g. whisper-1). Doubles the API cost per page.",
+                required=False,
+                show_in_ui=False,
+                default=None,
             ),
             ScriptArgument(
                 name="dry-run",
@@ -392,6 +400,10 @@ PRODUCTION_SCRIPTS: List[Script] = [
             ScriptExample(
                 command="python3 {path} ./target_adt --language es --non-strict-data-ids --verbose",
                 description="Generate timecodes allowing element/data-id count mismatches, with verbose logs",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --model whisper-1 --text-model gpt-4o-transcribe",
+                description="Hybrid: gpt-4o-transcribe for canonical word order, whisper-1 for precise word timings (2x API cost)",
             ),
             ScriptExample(
                 command="python3 {path} ./target_adt --language en --dry-run --verbose",

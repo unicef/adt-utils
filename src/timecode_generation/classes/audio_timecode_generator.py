@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import subprocess
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -33,10 +34,12 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         openai_api_key: str,
         logger: Optional[logging.Logger] = None,
         model: str = "whisper-1",
+        text_model: Optional[str] = None,
     ):
         self.client = OpenAI(api_key=openai_api_key)
         self.logger = logger or logging.getLogger(__name__)
         self.model = model
+        self.text_model = text_model
 
     def validate_config(self, config: TimecodeGenerationConfig) -> List[str]:
         """Validate configuration before processing."""
@@ -64,6 +67,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
     ) -> ProcessResult:
         """Generate timecode files for audio files inside a page range."""
         self.model = config.model
+        self.text_model = config.text_model
         errors = self.validate_config(config)
         if errors:
             return ProcessResult(success=False, errors=errors)
@@ -92,6 +96,22 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 if page_number is not None:
                     seen_pages.add(page_number)
 
+                output_file = timecode_dir / f"{audio_path.stem}.json"
+
+                # Honor manual corrections: if the existing file has
+                # "locked": true at the top level, skip generation so
+                # hand-edits aren't overwritten.
+                if output_file.exists():
+                    try:
+                        with open(output_file, "r", encoding="utf-8") as f:
+                            existing = json.load(f)
+                        if isinstance(existing, dict) and existing.get("locked") is True:
+                            self.logger.info("Skipping %s (locked)", output_file.name)
+                            generated_files += 1
+                            continue
+                    except Exception:
+                        pass  # unreadable — fall through and regenerate
+
                 if page_id in html_page_map:
                     page_text_entries = self._load_text_entries_from_html(
                         html_page_map[page_id], texts_dict
@@ -113,7 +133,6 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     strict_data_ids=config.strict_data_ids,
                 )
 
-                output_file = timecode_dir / f"{audio_path.stem}.json"
                 if config.dry_run:
                     self.logger.info("Dry run: would write %s", output_file)
                 else:
@@ -409,38 +428,172 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         language: str,
         initial_prompt: str = "",
     ) -> Dict[str, Any]:
+        """Transcribe one audio file. Hybrid when self.text_model is set."""
+        if self.text_model and self.text_model != self.model:
+            return self._hybrid_transcribe(audio_path, language, initial_prompt)
+        return self._transcribe_single(
+            audio_path, language, initial_prompt, model=self.model
+        )
+
+    def _transcribe_single(
+        self,
+        audio_path: Path,
+        language: str,
+        initial_prompt: str,
+        model: str,
+    ) -> Dict[str, Any]:
         transcription_language = self._transcription_language(language)
+        # Only whisper models support verbose_json / word-level timestamps.
+        # gpt-4o-transcribe and gpt-4o-mini-transcribe accept only "json"/"text"
+        # and return no segment/word timings at all.
+        supports_verbose = "whisper" in model.lower()
 
         with open(audio_path, "rb") as audio_file:
-            try:
+            if supports_verbose:
+                try:
+                    response = self.client.audio.transcriptions.create(
+                        model=model,
+                        file=audio_file,
+                        language=transcription_language,
+                        response_format="verbose_json",
+                        timestamp_granularities=["segment", "word"],
+                        temperature=0,
+                        prompt=initial_prompt or None,
+                    )
+                except Exception:
+                    audio_file.seek(0)
+                    response = self.client.audio.transcriptions.create(
+                        model=model,
+                        file=audio_file,
+                        language=transcription_language,
+                        response_format="verbose_json",
+                        temperature=0,
+                        prompt=initial_prompt or None,
+                    )
+            else:
                 response = self.client.audio.transcriptions.create(
-                    model=self.model,
+                    model=model,
                     file=audio_file,
                     language=transcription_language,
-                    response_format="verbose_json",
-                    timestamp_granularities=["segment", "word"],
-                    temperature=0,
-                    prompt=initial_prompt or None,
-                )
-            except Exception:
-                audio_file.seek(0)
-                response = self.client.audio.transcriptions.create(
-                    model=self.model,
-                    file=audio_file,
-                    language=transcription_language,
-                    response_format="verbose_json",
+                    response_format="json",
                     temperature=0,
                     prompt=initial_prompt or None,
                 )
 
         if hasattr(response, "model_dump"):
-            return response.model_dump()
-        if isinstance(response, dict):
-            return response
-        if hasattr(response, "to_dict"):
-            return response.to_dict()
+            payload = response.model_dump()
+        elif isinstance(response, dict):
+            payload = response
+        elif hasattr(response, "to_dict"):
+            payload = response.to_dict()
+        else:
+            payload = json.loads(str(response))
 
-        return json.loads(str(response))
+        # Synthesize a single full-duration segment when the model returned only
+        # text (e.g. gpt-4o-transcribe).  Downstream alignment then does
+        # proportional allocation across the audio duration instead of failing.
+        if not payload.get("segments") and not payload.get("words"):
+            text = str(payload.get("text") or "").strip()
+            duration = self._audio_duration(audio_path)
+            if text and duration > 0:
+                payload["segments"] = [
+                    {"start": 0.0, "end": duration, "text": text}
+                ]
+                payload["duration"] = duration
+                self.logger.info(
+                    "Model %s returned no word timings; using proportional "
+                    "allocation over audio duration (%.2fs)",
+                    model,
+                    duration,
+                )
+
+        return payload
+
+    def _hybrid_transcribe(
+        self,
+        audio_path: Path,
+        language: str,
+        initial_prompt: str,
+    ) -> Dict[str, Any]:
+        """Combine a text model (e.g. gpt-4o-transcribe) for canonical word
+        order with a timing model (e.g. whisper-1) for word-level timestamps.
+
+        The text model's tokens are treated as the reference order, and
+        whisper-1's timed words are matched to them via SequenceMatcher.
+        Unmatched text tokens get timings interpolated between neighbours.
+        The result is a synthetic transcription with content + order from
+        gpt-4o and timing from whisper, consumed by the existing pipeline.
+
+        Doubles the API cost per page.
+        """
+        self.logger.info(
+            "Hybrid transcription: text=%s, timing=%s", self.text_model, self.model
+        )
+        # Deliberately pass an empty prompt to gpt-4o-transcribe: LLM-style
+        # transcription models tend to echo a directive prompt instead of
+        # faithfully transcribing the audio, which defeats the point of using
+        # it for canonical audio-order word sequence.  Whisper-1 still gets
+        # the vocabulary prompt (it handles it as a hint, not a template).
+        text_resp = self._transcribe_single(
+            audio_path, language, "", model=self.text_model  # type: ignore[arg-type]
+        )
+        timing_resp = self._transcribe_single(
+            audio_path, language, initial_prompt, model=self.model
+        )
+
+        gpt_text = str(text_resp.get("text") or "").strip()
+        gpt_tokens = gpt_text.split()
+        whisper_words = [
+            self._normalize_word(w) for w in (timing_resp.get("words") or [])
+        ]
+        duration = (
+            float(text_resp.get("duration") or 0.0)
+            or float(timing_resp.get("duration") or 0.0)
+            or self._audio_duration(audio_path)
+        )
+
+        if not gpt_tokens or not whisper_words:
+            # Fall back to whichever response has the most structure
+            return timing_resp if whisper_words else text_resp
+
+        # Map gpt tokens to whisper timings (SequenceMatcher + interpolation)
+        unified = self._align_tokens_to_whisper_words(
+            gpt_tokens, whisper_words, time_window_end=duration or None
+        )
+
+        return {
+            "text": gpt_text,
+            "words": unified,
+            "segments": [
+                {"start": 0.0, "end": duration or (unified[-1]["end"] if unified else 0.0), "text": gpt_text}
+            ],
+            "duration": duration,
+        }
+
+    def _audio_duration(self, audio_path: Path) -> float:
+        """Return audio duration in seconds via ffprobe, or 0.0 if unavailable."""
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(audio_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            return float(result.stdout.strip())
+        except Exception as exc:
+            self.logger.warning(
+                "Could not determine audio duration for %s: %s", audio_path, exc
+            )
+            return 0.0
 
     def _transcription_language(self, language: str) -> str:
         """Convert locale-style language codes to ISO-639-1 for Whisper."""
@@ -575,7 +728,11 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 start = previous_end
                 end = previous_end
                 word_timestamps = self._tokens_with_interpolated_timing(tokens, start, end)
-            word_timestamps = self._enforce_word_monotonicity(word_timestamps)
+            # Cap monotonicity padding at the element's intended end so it
+            # can't cascade past the boundary and collapse the next element.
+            word_timestamps = self._enforce_word_monotonicity(
+                word_timestamps, max_end=end if end > start else None
+            )
             elements.append(
                 {
                     "id": entry["id"],
@@ -584,6 +741,81 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     "word_timestamps": word_timestamps,
                 }
             )
+
+        # Spread zero-duration spans across remaining audio time.
+        # Weak entries (no Whisper words assigned, e.g. form-field labels
+        # placed past the end of the sequence) collapse to start == end.
+        # Find each run of consecutive collapsed elements and distribute them
+        # proportionally across the available time window so they all get
+        # non-empty highlight slots.
+        audio_end = (
+            float(openai_words[-1]["end"]) if openai_words else 0.0
+        )
+        i = 0
+        while i < len(elements):
+            if elements[i]["end"] > elements[i]["start"] + 1e-6:
+                i += 1
+                continue
+            span_start = i
+            while (
+                i < len(elements)
+                and elements[i]["end"] <= elements[i]["start"] + 1e-6
+            ):
+                i += 1
+            span_end = i  # exclusive
+            t_start = (
+                elements[span_start - 1]["end"]
+                if span_start > 0
+                else 0.0
+            )
+            t_end = (
+                elements[span_end]["start"]
+                if span_end < len(elements)
+                else audio_end
+            )
+            # Guarantee a minimum per-entry slot so nothing stays collapsed
+            min_slot = 0.3
+            t_end = max(t_end, t_start + min_slot * (span_end - span_start))
+            counts = [
+                max(len(elements[k]["word_timestamps"]), 1)
+                for k in range(span_start, span_end)
+            ]
+            total = sum(counts) or 1
+            elapsed = 0.0
+            for j, k in enumerate(range(span_start, span_end)):
+                dur = (t_end - t_start) * counts[j] / total
+                new_start = t_start + elapsed
+                new_end = new_start + dur
+                elements[k]["start"] = round(new_start, 3)
+                elements[k]["end"] = round(new_end, 3)
+                wts = elements[k]["word_timestamps"]
+                if wts:
+                    wstep = dur / len(wts)
+                    for wi, w in enumerate(wts):
+                        w["start"] = round(new_start + wi * wstep, 3)
+                        w["end"] = round(new_start + (wi + 1) * wstep, 3)
+                elapsed += dur
+
+        # Safety net 1: ensure each element's window covers its own word
+        # timestamps.  Whisper word-index boundaries can fall inside a word's
+        # time range in fast speech, leaving trailing words unhighlightable
+        # (tts_highlighter.js deactivates at element.end).
+        for el in elements:
+            wts = el["word_timestamps"]
+            if wts:
+                el["start"] = round(min(el["start"], float(wts[0]["start"])), 3)
+                el["end"] = round(max(el["end"], float(wts[-1]["end"])), 3)
+
+        # Safety net 2: prevent overlap.  tts_highlighter.js loops elements
+        # and breaks on the first match — overlapping elements would hide the
+        # later one entirely.  If safety-net 1 extended an element's end past
+        # the next element's start, shift the next element's start forward,
+        # and push its end along so we never produce end < start.
+        for i in range(1, len(elements)):
+            if elements[i]["start"] < elements[i - 1]["end"]:
+                elements[i]["start"] = elements[i - 1]["end"]
+            if elements[i]["end"] < elements[i]["start"]:
+                elements[i]["end"] = elements[i]["start"]
 
         return elements
 
@@ -594,18 +826,18 @@ class AudioTimecodeGenerator(PageRangeProcessor):
     ) -> Tuple[List[Dict[str, str]], List[int], bool]:
         """Return (ordered_entries, boundary_positions, reliable).
 
-        Two-pass alignment:
+        Strong/weak split alignment:
 
-        Pass 1 — find each entry's best unconstrained anchor to determine
-        audio order (handles pages where DOM order ≠ reading order).
-
-        Pass 2 — re-anchor each entry sequentially. Entry N's search starts
-        at (previous anchor + previous entry's token count), so two entries
-        that share a rare word (e.g. "Guazubirá" appearing in both) cannot
-        both anchor to the same early window. Without this constraint the
-        second entry's boundary would land inside the first entry's word span,
-        causing the element end-time to be set before some of its own words
-        are spoken, making those words unhighlightable.
+        - Pass 1 — compute each entry's best unconstrained anchor and score.
+        - Entries with score >= MATCH_THRESHOLD are "strong" (likely present
+          in the audio); the rest are "weak" (form-field placeholders or
+          other non-spoken data-ids).
+        - Strong entries are sorted by Pass 1 anchor to establish audio order,
+          then re-anchored sequentially in Pass 2 to avoid overlap when two
+          entries share a rare word (e.g. "Guazubirá" appearing in both).
+        - Weak entries are inserted back at their DOM-relative positions
+          between strong neighbours — so form labels don't bubble to the
+          front and don't trigger an all-or-nothing fallback.
         """
         if len(page_text_entries) <= 1 or not whisper_words:
             return page_text_entries, [0], True
@@ -614,40 +846,110 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             self._normalize_token(w["text"]) for w in whisper_words
         ]
 
-        # Pass 1: unconstrained anchor per entry → determines audio order
-        raw: List[Tuple[int, float, Dict[str, str]]] = []
-        for entry in page_text_entries:
+        match_threshold = 0.2
+
+        # Pass 1: raw anchors per entry (keyed by DOM index so we can weave
+        # unmatched entries back in by their original position).
+        raw: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
+        for dom_idx, entry in enumerate(page_text_entries):
             tokens = [
                 self._normalize_token(t)
                 for t in self._split_reference_words(entry["text"])
             ]
             pos, score = self._find_best_whisper_match(tokens, whisper_normalized)
-            raw.append((pos, score, entry))
+            raw.append((dom_idx, pos, score, entry, tokens))
 
-        raw.sort(key=lambda x: x[0])
+        strong = [r for r in raw if r[2] >= match_threshold]
+        weak = [r for r in raw if r[2] < match_threshold]
 
-        # Pass 2: sequential re-anchor — each entry starts after the
-        # previous entry's matched span (anchor + token count).
-        ranked: List[Tuple[int, float, Dict[str, str]]] = []
+        # Detect substring anchors: a strong entry whose Pass 1 anchor falls
+        # inside an earlier strong entry's claimed word-index range is matching
+        # a subsequence of that entry, not an independent audio phrase.
+        # Classic case: "Cuando corre" (2 tokens) anchoring inside
+        # "Corazón que late rápido cuando corre" (6 tokens).  Leaving it
+        # strong causes the longer entry to inherit a huge time window
+        # (from its own start to where the short entry re-anchors in Pass 2),
+        # freezing the highlighter for seconds between elements.
+        occupied_ranges: List[Tuple[int, int]] = []  # (w_start, w_end)
+        strong_clean: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
+        extra_weak: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
+        for r in strong:  # DOM order preserved from raw
+            _dom_idx, pos, _score, entry, tokens = r
+            if any(ws <= pos < we for ws, we in occupied_ranges):
+                extra_weak.append(r)
+                self.logger.debug(
+                    "Reclassified %s as weak: anchor %d overlaps an earlier entry's word range",
+                    entry["id"],
+                    pos,
+                )
+            else:
+                strong_clean.append(r)
+                occupied_ranges.append((pos, pos + len(tokens)))
+        strong = strong_clean
+        weak = sorted(weak + extra_weak, key=lambda r: r[0])
+
+        if len(strong) < 2:
+            # Not enough signal to reorder reliably — keep DOM order and let
+            # the caller fall through to proportional allocation.
+            return (
+                page_text_entries,
+                list(range(len(page_text_entries))),
+                False,
+            )
+
+        if weak:
+            self.logger.debug(
+                "Reorder: %d strong / %d weak entries (%s)",
+                len(strong),
+                len(weak),
+                ", ".join(w[3]["id"] for w in weak),
+            )
+
+        # Sort strong entries by Pass 1 anchor to establish audio order
+        strong_sorted = sorted(strong, key=lambda r: r[1])
+
+        # Pass 2: sequential re-anchor on strong entries only
+        strong_seq: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
         search_from = 0
-        for _, _, entry in raw:
-            tokens = [
-                self._normalize_token(t)
-                for t in self._split_reference_words(entry["text"])
-            ]
+        for dom_idx, _, _, entry, tokens in strong_sorted:
             rel_pos, score = self._find_best_whisper_match(
                 tokens, whisper_normalized[search_from:]
             )
             abs_pos = search_from + rel_pos
-            ranked.append((abs_pos, score, entry))
+            strong_seq.append((dom_idx, abs_pos, score, entry, tokens))
             search_from = abs_pos + max(len(tokens), 1)
 
-        min_score = min(r[1] for r in ranked)
-        positions_unique = len({r[0] for r in ranked}) == len(ranked)
-        reliable = min_score >= 0.2 and positions_unique
+        # Weave weak entries back in at their DOM-relative positions
+        final = list(strong_seq)
+        # Iterate weak entries in DOM order so their relative order is preserved
+        for um in sorted(weak, key=lambda r: r[0]):
+            insert_at = len(final)
+            for i, m in enumerate(final):
+                if m[0] > um[0]:
+                    insert_at = i
+                    break
+            # Give weak entry a sequential position just after its predecessor
+            # so the boundary list remains strictly increasing.
+            prev_abs = final[insert_at - 1][1] if insert_at > 0 else 0
+            prev_tokens = final[insert_at - 1][4] if insert_at > 0 else []
+            new_abs = prev_abs + max(len(prev_tokens), 1)
+            final.insert(insert_at, (um[0], new_abs, um[2], um[3], um[4]))
 
-        ordered = [r[2] for r in ranked]
-        boundaries = [r[0] for r in ranked]
+        # Enforce strictly increasing boundary positions for downstream use
+        for i in range(1, len(final)):
+            if final[i][1] <= final[i - 1][1]:
+                final[i] = (
+                    final[i][0],
+                    final[i - 1][1] + 1,
+                    final[i][2],
+                    final[i][3],
+                    final[i][4],
+                )
+
+        ordered = [r[3] for r in final]
+        boundaries = [r[1] for r in final]
+        # We got here with at least 2 strong matches, so ordering is reliable.
+        reliable = True
         return ordered, boundaries, reliable
 
     @staticmethod
@@ -668,6 +970,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         best_pos = 0
         best_score = 0.0
         window_extra = max(2, n // 2)
+        first_ref = entry_tokens[0]
 
         for start in range(len(whisper_normalized)):
             window = whisper_normalized[start : start + n + window_extra]
@@ -675,6 +978,16 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 break
             raw = SequenceMatcher(None, entry_tokens, window).ratio()
             score = raw * n
+            # Head-match bonus: phrases almost always start at a phrase
+            # boundary in the audio.  Reward windows whose first token equals
+            # the entry's first reference token so ties and near-ties resolve
+            # to the correct phrase start, not an earlier position where a
+            # common middle word happens to align.  Require first_ref to be
+            # non-empty — otherwise punctuation-only entries (e.g. "—") would
+            # spuriously anchor wherever Whisper has empty-normalized tokens.
+            if first_ref and window[0] == first_ref:
+                score += 1.0
+
             if score > best_score:
                 best_score = score
                 best_pos = start
@@ -840,20 +1153,44 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             for token, t in zip(tokens, timings)
         ]
 
+    # Minimum word duration (seconds) enforced on every generated word.
+    # tts_highlighter.js silently drops words whose `end - start` is below
+    # ~0.06 s, so we clamp to a slightly larger floor to guarantee every
+    # word gets a render slot.
+    MIN_WORD_DURATION_S = 0.08
+
     @staticmethod
     def _enforce_word_monotonicity(
         word_timestamps: List[Dict[str, Any]],
+        max_end: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """Clamp word timestamps so start times are non-decreasing and start <= end.
+        """Clamp word timestamps so start times are non-decreasing,
+        start <= end, and every word has at least MIN_WORD_DURATION_S between
+        its start and end.
+
+        When ``max_end`` is provided, word ends are capped at that value so
+        the MIN_WORD_DURATION padding can't cascade past the containing
+        element's intended boundary (which previously caused elements to
+        over-extend, forcing downstream elements to collapse to zero duration).
 
         tts_highlighter.js scans backwards to find the last word where
-        currentTime >= word.start, so non-monotone timestamps cause stale highlights.
+        currentTime >= word.start, so non-monotone timestamps cause stale
+        highlights. It also drops zero- or near-zero-duration words — the
+        minimum-duration clamp prevents fast-speech words from vanishing.
         """
+        min_dur = AudioTimecodeGenerator.MIN_WORD_DURATION_S
         result = []
         prev_end = 0.0
         for word in word_timestamps:
             start = max(float(word["start"]), prev_end)
-            end = max(float(word["end"]), start)
+            end = max(float(word["end"]), start + min_dur)
+            if max_end is not None:
+                if start > max_end:
+                    start = max_end
+                if end > max_end:
+                    end = max_end
+                if end < start:
+                    end = start
             result.append({"text": word["text"], "start": round(start, 3), "end": round(end, 3)})
             prev_end = end
         return result

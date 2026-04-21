@@ -28,12 +28,25 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
+# Silence noisy third-party HTTP libraries so --verbose shows only our
+# own pipeline messages (Reorder, Hybrid transcription, etc.).
+for _noisy in (
+    "httpx",
+    "httpcore",
+    "openai",
+    "urllib3",
+):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate timecode JSON files from ADT language audio files"
+        description=(
+            "Generate timecode JSON files from ADT language audio files. "
+            "Existing output files with \"locked\": true at the top level "
+            "are preserved so hand-corrections survive re-runs."
+        )
     )
     parser = add_standard_args(parser)
     parser.add_argument(
@@ -51,7 +64,24 @@ def main() -> int:
         "--model",
         type=str,
         default="whisper-1",
-        help="OpenAI transcription model (default: whisper-1)",
+        help=(
+            "OpenAI transcription model (default: whisper-1). "
+            "whisper-1 returns word-level timestamps for precise alignment. "
+            "gpt-4o-transcribe is more accurate on text content but returns "
+            "no timestamps — timing degrades to proportional allocation "
+            "across the audio duration (requires ffprobe installed)."
+        ),
+    )
+    parser.add_argument(
+        "--text-model",
+        type=str,
+        default=None,
+        help=(
+            "Optional hybrid mode: fetch text content from this model and "
+            "word timings from --model. Typical use: --text-model "
+            "gpt-4o-transcribe (canonical word order) with --model whisper-1 "
+            "(precise timings). Doubles the API cost per page."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -100,6 +130,7 @@ def main() -> int:
         language=args.language,
         api_key=api_key,
         model=args.model,
+        text_model=args.text_model,
         dry_run=args.dry_run,
         strict_data_ids=not args.non_strict_data_ids,
     )
@@ -108,6 +139,7 @@ def main() -> int:
         openai_api_key=api_key,
         logger=logger,
         model=args.model,
+        text_model=args.text_model,
     )
     result = generator.process_page_range(config)
 

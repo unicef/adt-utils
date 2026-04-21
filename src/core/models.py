@@ -70,6 +70,15 @@ class TimecodeGenerationConfig(PageProcessConfig):
         default=None, description="API key for transcription service"
     )
     model: str = Field(default="whisper-1", description="Transcription model to use")
+    text_model: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional text-content model used to establish word order "
+            "(e.g. gpt-4o-transcribe). When set, the generator fetches text "
+            "from this model and timings from `model`, then aligns them into "
+            "a hybrid transcription (accurate content + precise timestamps)."
+        ),
+    )
     dry_run: bool = Field(
         default=False,
         description="Preview generated files without writing output",

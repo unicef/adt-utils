@@ -387,23 +387,43 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 show_in_ui=True,
                 default=False,
             ),
+            ScriptArgument(
+                name="char-timing",
+                type="bool",
+                description="Derive word durations from character count instead of Whisper. No API key required. Rule: 1–3 letters = 0.2 s, 4–7 = 0.4 s, 8+ = 0.6 s; 0.6 s inter-element gap.",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
         ],
         examples=[
             ScriptExample(
                 command="python3 {path} ./target_adt --language es",
-                description="Generate timecodes for all Spanish audio files",
+                description="Generate timecodes for all Spanish audio files using Whisper (default, word-level timestamps)",
             ),
             ScriptExample(
                 command="python3 {path} ./target_adt --language es --start-page 6 --end-page 20",
                 description="Generate timecodes for pages 6-20 only",
             ),
             ScriptExample(
-                command="python3 {path} ./target_adt --language es --non-strict-data-ids --verbose",
-                description="Generate timecodes allowing element/data-id count mismatches, with verbose logs",
+                command="python3 {path} ./target_adt --language es --model whisper-1 --text-model gpt-4o-transcribe",
+                description="Hybrid mode: gpt-4o-transcribe for accurate word order, whisper-1 for precise word timings (2x API cost, best quality)",
             ),
             ScriptExample(
-                command="python3 {path} ./target_adt --language es --model whisper-1 --text-model gpt-4o-transcribe",
-                description="Hybrid: gpt-4o-transcribe for canonical word order, whisper-1 for precise word timings (2x API cost)",
+                command="python3 {path} ./target_adt --language es --model gpt-4o-transcribe",
+                description="Text-only mode: gpt-4o-transcribe for accurate transcription, timing allocated proportionally via ffprobe (no word-level timestamps)",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --char-timing",
+                description="Char-timing mode: derive word durations from letter count (no API key needed, use when Whisper fails or produces collapsed elements)",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --start-page 49 --end-page 49 --char-timing",
+                description="Char-timing for a single problematic page (fixes start==end errors without an API call)",
+            ),
+            ScriptExample(
+                command="python3 {path} ./target_adt --language es --non-strict-data-ids --verbose",
+                description="Generate timecodes allowing element/data-id count mismatches, with verbose logs",
             ),
             ScriptExample(
                 command="python3 {path} ./target_adt --language en --dry-run --verbose",

@@ -87,3 +87,11 @@ class TimecodeGenerationConfig(PageProcessConfig):
         default=True,
         description="Require exact data-id matches from texts.json for each generated element",
     )
+    use_char_timing: bool = Field(
+        default=False,
+        description=(
+            "Derive word durations from character count instead of Whisper transcription. "
+            "No API key required. Rule: 1–3 letters = 0.2 s, 4–7 = 0.4 s, 8+ = 0.6 s; "
+            "0.6 s inter-element gap."
+        ),
+    )

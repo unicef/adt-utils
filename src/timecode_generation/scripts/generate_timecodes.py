@@ -98,6 +98,15 @@ def main() -> int:
         action="store_true",
         help="Enable verbose logging output",
     )
+    parser.add_argument(
+        "--char-timing",
+        action="store_true",
+        help=(
+            "Derive word durations from character count instead of Whisper. "
+            "No OpenAI API key required. "
+            "Rule: 1–3 letters = 0.2 s, 4–7 = 0.4 s, 8+ = 0.6 s; 0.6 s gap between elements."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -113,7 +122,7 @@ def main() -> int:
         return 1
 
     api_key = args.api_key or os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key and not args.char_timing:
         print(
             "Error: OpenAI API key must be provided via --api-key or OPENAI_API_KEY",
             file=sys.stderr,
@@ -133,10 +142,11 @@ def main() -> int:
         text_model=args.text_model,
         dry_run=args.dry_run,
         strict_data_ids=not args.non_strict_data_ids,
+        use_char_timing=args.char_timing,
     )
 
     generator = AudioTimecodeGenerator(
-        openai_api_key=api_key,
+        openai_api_key=api_key or "",
         logger=logger,
         model=args.model,
         text_model=args.text_model,

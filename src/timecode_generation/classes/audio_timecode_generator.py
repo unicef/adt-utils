@@ -124,14 +124,20 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                         page_number, texts_dict
                     )
 
-                payload = self._generate_timecode_payload(
-                    audio_path=audio_path,
-                    page_id=page_id,
-                    page_number=page_number,
-                    language=config.language,
-                    page_text_entries=page_text_entries,
-                    strict_data_ids=config.strict_data_ids,
-                )
+                if config.use_char_timing:
+                    payload = self._generate_char_timing_payload(
+                        page_id=page_id,
+                        page_text_entries=page_text_entries,
+                    )
+                else:
+                    payload = self._generate_timecode_payload(
+                        audio_path=audio_path,
+                        page_id=page_id,
+                        page_number=page_number,
+                        language=config.language,
+                        page_text_entries=page_text_entries,
+                        strict_data_ids=config.strict_data_ids,
+                    )
 
                 if config.dry_run:
                     self.logger.info("Dry run: would write %s", output_file)
@@ -157,6 +163,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             "language": config.language,
             "model": config.model,
             "strict_data_ids": config.strict_data_ids,
+            "char_timing": config.use_char_timing,
             "texts_data_ids_loaded": len(texts_dict),
             "html_pages_found": len(html_page_map),
         }
@@ -728,10 +735,17 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 start = previous_end
                 end = previous_end
                 word_timestamps = self._tokens_with_interpolated_timing(tokens, start, end)
-            # Cap monotonicity padding at the element's intended end so it
-            # can't cascade past the boundary and collapse the next element.
+            # Cap monotonicity padding unless tail overflow occurred.
+            # When char-count durations (or min-dur cascades from tight Whisper
+            # anchors) push the last word past element_time_end, passing max_end
+            # would re-collapse the overflowed words. Instead, let them extend
+            # naturally; Safety nets 1 and 2 below expand the element boundary
+            # and push the next element's start forward to absorb the extension.
+            wt_last_end = float(word_timestamps[-1]["end"]) if word_timestamps else end
+            tail_overflowed = wt_last_end > end
             word_timestamps = self._enforce_word_monotonicity(
-                word_timestamps, max_end=end if end > start else None
+                word_timestamps,
+                max_end=None if tail_overflowed else (end if end > start else None),
             )
             elements.append(
                 {
@@ -875,7 +889,13 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         extra_weak: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
         for r in strong:  # DOM order preserved from raw
             _dom_idx, pos, _score, entry, tokens = r
-            if any(ws <= pos < we for ws, we in occupied_ranges):
+            # Only demote if the entry is shorter than the occupied range it
+            # overlaps — a genuine substring must fit inside the claimant's
+            # window.  A 24-token entry cannot be a substring of a 9-token
+            # range; requiring len(tokens) < range_width prevents false
+            # positives when two entries share a common opening word (e.g.
+            # "—Tiene" in text-13-20 matching the "tiene" inside text-13-19).
+            if any(ws <= pos < we and len(tokens) < (we - ws) for ws, we in occupied_ranges):
                 extra_weak.append(r)
                 self.logger.debug(
                     "Reclassified %s as weak: anchor %d overlaps an earlier entry's word range",
@@ -1014,6 +1034,69 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         no_punct = re.sub(r'[^\w\s]', '', lowered, flags=re.UNICODE).strip()
         return AudioTimecodeGenerator._strip_diacritics(no_punct)
 
+    @staticmethod
+    def _char_duration_for_word(word: str) -> float:
+        """Return duration in seconds for a word based on stripped letter count.
+
+        Strips punctuation before counting: 1–3 letters → 0.2 s, 4–7 → 0.4 s, 8+ → 0.6 s.
+        """
+        stripped = re.sub(r'[«».,!?;:"\'\-\(\)\[\]]', '', word)
+        n = len(stripped)
+        if n <= 3:
+            return 0.2
+        if n <= 7:
+            return 0.4
+        return 0.6
+
+    def _build_elements_from_char_durations(
+        self,
+        page_text_entries: List[Dict[str, str]],
+        start_time: float = 0.0,
+        inter_element_gap: float = 0.6,
+    ) -> List[Dict[str, Any]]:
+        """Build timecode elements using character-count-based word durations.
+
+        Does not require audio or API access. Each word's duration is derived from
+        its letter count; a fixed gap separates consecutive elements.
+        """
+        elements: List[Dict[str, Any]] = []
+        current = start_time
+        for entry in page_text_entries:
+            tokens = self._split_reference_words(entry["text"])
+            if not tokens:
+                continue
+            el_start = current
+            word_timestamps: List[Dict[str, Any]] = []
+            for token in tokens:
+                dur = self._char_duration_for_word(token)
+                word_timestamps.append(
+                    {
+                        "text": token,
+                        "start": round(current, 3),
+                        "end": round(current + dur, 3),
+                    }
+                )
+                current += dur
+            elements.append(
+                {
+                    "id": entry["id"],
+                    "start": round(el_start, 3),
+                    "end": round(current, 3),
+                    "word_timestamps": word_timestamps,
+                }
+            )
+            current += inter_element_gap
+        return elements
+
+    def _generate_char_timing_payload(
+        self,
+        page_id: str,
+        page_text_entries: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """Build a timecode payload from character-count durations (no API call)."""
+        elements = self._build_elements_from_char_durations(page_text_entries)
+        return {"page_id": page_id, "elements": elements}
+
     def _build_elements_from_time_window(
         self,
         page_text_entries: List[Dict[str, str]],
@@ -1103,16 +1186,36 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         ref_norm = [self._normalize_token(t) for t in tokens]
         wh_norm = [self._normalize_token(w["text"]) for w in whisper_words]
 
-        # Build anchor map: token_index → (start, end) from matched Whisper word
+        # Build anchor map: token_index → (start, end) from matched Whisper word.
+        # Cap anchor durations that exceed max(4 × char_dur, 1.0) seconds to avoid
+        # Whisper's "end = next_word_start" convention inflating short words across
+        # long silences (e.g. "se" spanning 7 s of silence → capped to 0.2 s).
         anchors: Dict[int, Tuple[float, float]] = {}
         for a, b, size in SequenceMatcher(None, ref_norm, wh_norm).get_matching_blocks():
             for k in range(size):
-                anchors[a + k] = (
-                    float(whisper_words[b + k]["start"]),
-                    float(whisper_words[b + k]["end"]),
-                )
+                w_start = float(whisper_words[b + k]["start"])
+                w_end = float(whisper_words[b + k]["end"])
+                char_dur = self._char_duration_for_word(tokens[a + k])
+                threshold = max(4.0 * char_dur, 1.0)
+                if w_end - w_start > threshold:
+                    w_end = w_start + char_dur
+                anchors[a + k] = (w_start, w_end)
 
-        # Fill in timings for all tokens; interpolate linearly across gaps
+        # Fill in timings for all tokens using char-count-based durations.
+        #
+        # Replacing equal-step interpolation fixes two failure modes:
+        #
+        # 1. Gap bloat: a single short token (e.g. the clitic "se") between two
+        #    far-apart Whisper anchors previously inherited the entire gap
+        #    (e.g. 7 seconds). Now it gets its natural char-count duration
+        #    (0.2 s) and the remaining silence stays silent.
+        #
+        # 2. Tail collapse: when more reference words follow the last anchor
+        #    than fit in the remaining element window, words previously piled
+        #    up at the element boundary. Now each word gets at least
+        #    MIN_WORD_DURATION_S. The small overflow past global_end is
+        #    intentional — Safety nets 1 and 2 in the outer loop will expand
+        #    the element boundary and push the next element's start forward.
         timings: List[Optional[Tuple[float, float]]] = [None] * len(tokens)
         for idx, timing in anchors.items():
             timings[idx] = timing
@@ -1136,12 +1239,41 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     gap_end = n
                     break
             gap_len = gap_end - i
+            is_tail = gap_end == len(tokens)  # no next anchor; gap runs to global_end
             duration = next_start - prev_end
-            # Use a minimum 0.2 s/token so trailing unmatched tokens never
-            # collapse to the same timestamp and become un-highlightable.
-            step = duration / gap_len if (gap_len > 0 and duration > 0) else 0.2
-            for j in range(gap_len):
-                timings[i + j] = (prev_end + j * step, prev_end + (j + 1) * step)
+
+            char_durs = [self._char_duration_for_word(tokens[i + j]) for j in range(gap_len)]
+            total_char = sum(char_durs)
+
+            t = prev_end
+            if duration <= 0:
+                # No time window at all; stack tokens with char durations from prev_end
+                for j in range(gap_len):
+                    timings[i + j] = (t, t + char_durs[j])
+                    t += char_durs[j]
+            elif total_char <= duration:
+                # Tokens fit within the window; use char durations and leave
+                # the remaining gap as silence before the next anchor.
+                for j in range(gap_len):
+                    timings[i + j] = (t, t + char_durs[j])
+                    t += char_durs[j]
+            elif is_tail:
+                # Tail overflow: content exceeds the remaining window.
+                # Assign MIN_WORD_DURATION_S per token starting from prev_end;
+                # each word gets the smallest distinguishable slot and the
+                # bounded extension past global_end is handled by Safety nets.
+                for j in range(gap_len):
+                    timings[i + j] = (t, t + self.MIN_WORD_DURATION_S)
+                    t += self.MIN_WORD_DURATION_S
+            else:
+                # Interior overflow: more content than fits between two anchors.
+                # Compress proportionally by char-count weights so short words
+                # still get less time than long ones.
+                scale = duration / total_char
+                for j in range(gap_len):
+                    d = char_durs[j] * scale
+                    timings[i + j] = (t, t + d)
+                    t += d
             i = gap_end
 
         return [

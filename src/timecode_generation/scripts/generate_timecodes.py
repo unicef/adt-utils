@@ -75,12 +75,21 @@ def main() -> int:
     parser.add_argument(
         "--text-model",
         type=str,
-        default=None,
+        default="gpt-4o-transcribe",
         help=(
-            "Optional hybrid mode: fetch text content from this model and "
-            "word timings from --model. Typical use: --text-model "
-            "gpt-4o-transcribe (canonical word order) with --model whisper-1 "
-            "(precise timings). Doubles the API cost per page."
+            "Model for text content in hybrid mode (default: gpt-4o-transcribe). "
+            "Paired with --model (whisper-1) for best results: accurate word order "
+            "from gpt-4o-transcribe, precise word timings from whisper-1. "
+            "Doubles the API cost per page. Pass --no-hybrid to disable."
+        ),
+    )
+    parser.add_argument(
+        "--no-hybrid",
+        action="store_true",
+        help=(
+            "Disable hybrid mode: use only --model for both text and timing. "
+            "Halves API cost but may produce less accurate word order than the "
+            "default gpt-4o-transcribe + whisper-1 combination."
         ),
     )
     parser.add_argument(
@@ -132,6 +141,8 @@ def main() -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    text_model = None if args.no_hybrid else args.text_model
+
     config = TimecodeGenerationConfig(
         start_page=start_page,
         end_page=end_page,
@@ -139,7 +150,7 @@ def main() -> int:
         language=args.language,
         api_key=api_key,
         model=args.model,
-        text_model=args.text_model,
+        text_model=text_model,
         dry_run=args.dry_run,
         strict_data_ids=not args.non_strict_data_ids,
         use_char_timing=args.char_timing,
@@ -149,7 +160,7 @@ def main() -> int:
         openai_api_key=api_key or "",
         logger=logger,
         model=args.model,
-        text_model=args.text_model,
+        text_model=text_model,
     )
     result = generator.process_page_range(config)
 

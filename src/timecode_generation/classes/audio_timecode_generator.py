@@ -355,6 +355,11 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 continue
             if self._extract_page_number_from_data_id(data_id) is None:
                 continue  # skip section IDs, aria IDs, img IDs, etc.
+            if self._is_hidden(element):
+                self.logger.debug(
+                    "Skipping hidden data-id %s in %s", data_id, html_path.name
+                )
+                continue
             seen.add(data_id)
             text = unicodedata.normalize(
                 "NFC",
@@ -364,6 +369,28 @@ class AudioTimecodeGenerator(PageRangeProcessor):
 
         self.logger.debug("Extracted %d text entries from %s", len(entries), html_path)
         return entries
+
+    @staticmethod
+    def _is_hidden(element: Any) -> bool:
+        """Return True if the element or any ancestor is visually hidden.
+
+        Treats the Tailwind `hidden` class, the HTML `hidden` attribute, and
+        inline `display: none` as hidden. Audio narrations don't cover hidden
+        content (e.g. activity panels revealed only after user interaction),
+        so their data-ids must be excluded from timecode generation.
+        """
+        for ancestor in [element, *element.parents]:
+            if getattr(ancestor, "name", None) is None:
+                continue
+            classes = ancestor.get("class") or []
+            if "hidden" in classes:
+                return True
+            if ancestor.has_attr("hidden"):
+                return True
+            style = ancestor.get("style") or ""
+            if "display:none" in style.replace(" ", "").lower():
+                return True
+        return False
 
     def _load_text_entries_from_texts_dict(
         self,
@@ -747,6 +774,34 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                 word_timestamps,
                 max_end=None if tail_overflowed else (end if end > start else None),
             )
+
+            # Post-processing safety net: redistribute any trailing run of
+            # Post-processing safety net: redistribute any trailing run of
+            # truly zero-duration words (start == end). Short-but-nonzero Whisper
+            # anchors (e.g. "triste" at 0.02 s) are left untouched. This catches
+            # any residual collapses that survive _enforce_word_monotonicity.
+            last_good_end = start
+            for w in word_timestamps:
+                if float(w["end"]) > float(w["start"]):
+                    last_good_end = float(w["end"])
+            collapsed_tail_start: Optional[int] = None
+            for wi, w in enumerate(word_timestamps):
+                if float(w["end"]) <= float(w["start"]) + 1e-6:
+                    if collapsed_tail_start is None:
+                        collapsed_tail_start = wi
+                else:
+                    collapsed_tail_start = None
+            if collapsed_tail_start is not None:
+                t = last_good_end
+                for w in word_timestamps[collapsed_tail_start:]:
+                    dur = self._char_duration_for_word(w["text"])
+                    w["start"] = round(t, 3)
+                    w["end"] = round(t + dur, 3)
+                    t += dur
+                wt_last_end = float(word_timestamps[-1]["end"])
+                if wt_last_end > end:
+                    end = wt_last_end
+
             elements.append(
                 {
                     "id": entry["id"],
@@ -1316,9 +1371,12 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         for word in word_timestamps:
             start = max(float(word["start"]), prev_end)
             end = max(float(word["end"]), start + min_dur)
-            if max_end is not None:
-                if start > max_end:
-                    start = max_end
+            # Only apply max_end capping while start is strictly before the
+            # boundary. Once a word starts at or past max_end (because prev_end
+            # cascaded beyond it), let the word overflow freely so that Safety
+            # nets 1 & 2 can extend the element's window rather than collapsing
+            # the word to zero duration.
+            if max_end is not None and start < max_end:
                 if end > max_end:
                     end = max_end
                 if end < start:

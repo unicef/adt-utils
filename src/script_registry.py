@@ -395,22 +395,30 @@ PRODUCTION_SCRIPTS: List[Script] = [
                 show_in_ui=True,
                 default=False,
             ),
+            ScriptArgument(
+                name="no-hybrid",
+                type="bool",
+                description="Disable hybrid mode: use only --model for both text and timing. Halves API cost but may produce less accurate word order than the default gpt-4o-transcribe + whisper-1 combination.",
+                required=False,
+                show_in_ui=True,
+                default=False,
+            ),
         ],
         examples=[
             ScriptExample(
                 command="python3 {path} ./target_adt --language es",
-                description="Generate timecodes for all Spanish audio files using Whisper (default, word-level timestamps)",
+                description="Generate timecodes for all Spanish audio files (default: hybrid gpt-4o-transcribe + whisper-1, best quality)",
             ),
             ScriptExample(
                 command="python3 {path} ./target_adt --language es --start-page 6 --end-page 20",
                 description="Generate timecodes for pages 6-20 only",
             ),
             ScriptExample(
-                command="python3 {path} ./target_adt --language es --model whisper-1 --text-model gpt-4o-transcribe",
-                description="Hybrid mode: gpt-4o-transcribe for accurate word order, whisper-1 for precise word timings (2x API cost, best quality)",
+                command="python3 {path} ./target_adt --language es --no-hybrid",
+                description="Whisper-only mode: use whisper-1 for both text and timing (half the API cost, less accurate word order)",
             ),
             ScriptExample(
-                command="python3 {path} ./target_adt --language es --model gpt-4o-transcribe",
+                command="python3 {path} ./target_adt --language es --model gpt-4o-transcribe --no-hybrid",
                 description="Text-only mode: gpt-4o-transcribe for accurate transcription, timing allocated proportionally via ffprobe (no word-level timestamps)",
             ),
             ScriptExample(

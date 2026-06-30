@@ -88,6 +88,9 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         generated_files = 0
         failed_files = 0
         seen_pages = set()
+        pages_with_issues = 0
+        total_issues = 0
+        total_errors = 0
 
         for audio_path in files:
             try:
@@ -129,14 +132,40 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                         page_id=page_id,
                         page_text_entries=page_text_entries,
                     )
+                    issues = self._validate_elements(payload.get("elements", []))
                 else:
-                    payload = self._generate_timecode_payload(
+                    payload, issues = self._generate_validated_payload(
                         audio_path=audio_path,
                         page_id=page_id,
                         page_number=page_number,
                         language=config.language,
                         page_text_entries=page_text_entries,
                         strict_data_ids=config.strict_data_ids,
+                        audio_duration=self._audio_duration(audio_path),
+                        max_attempts=config.max_regen_attempts,
+                    )
+
+                if issues:
+                    pages_with_issues += 1
+                    total_issues += len(issues)
+                    n_errors = sum(1 for i in issues if i["severity"] == "error")
+                    total_errors += n_errors
+                    messages = [i["message"] for i in issues]
+                    summary = "; ".join(messages[:5])
+                    if len(messages) > 5:
+                        summary += f" (+{len(messages) - 5} more)"
+                    self.logger.warning(
+                        "%s: %d evident timecode issue(s) remain after generation "
+                        "(%d error, %d warning): %s",
+                        page_id,
+                        len(issues),
+                        n_errors,
+                        len(issues) - n_errors,
+                        summary,
+                    )
+                    result.warnings.append(
+                        f"{page_id}: {len(issues)} timecode issue(s) "
+                        f"({n_errors} error): {summary}"
                     )
 
                 if config.dry_run:
@@ -166,6 +195,10 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             "char_timing": config.use_char_timing,
             "texts_data_ids_loaded": len(texts_dict),
             "html_pages_found": len(html_page_map),
+            "max_regen_attempts": config.max_regen_attempts,
+            "pages_with_issues": pages_with_issues,
+            "total_issues": total_issues,
+            "total_errors": total_errors,
         }
 
         if failed_files > 0:
@@ -227,9 +260,12 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         language: str,
         page_text_entries: List[Dict[str, str]],
         strict_data_ids: bool,
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         initial_prompt = self._build_whisper_prompt(page_text_entries)
-        transcription = self._transcribe_audio(audio_path, language, initial_prompt=initial_prompt)
+        transcription = self._transcribe_audio(
+            audio_path, language, initial_prompt=initial_prompt, temperature=temperature
+        )
         return self._build_timecode_payload(
             page_id=page_id,
             page_number=page_number,
@@ -237,6 +273,186 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             page_text_entries=page_text_entries,
             strict_data_ids=strict_data_ids,
         )
+
+    # --- Validation / self-correction ---------------------------------------
+
+    # An element's end may legitimately run past its last word to keep the
+    # highlight active through a short inter-line silence ("continuous
+    # coverage"). Only a gap larger than this is treated as a frozen/"stuck"
+    # window worth regenerating.
+    STUCK_WINDOW_GAP_S = 3.0
+    # Allowed slack when comparing an element's window to its own words.
+    # Kept above sub-0.1 s rounding noise from the spreading/interpolation
+    # steps so only genuine bound mismatches (typically >1 s) are flagged.
+    BOUNDS_TOLERANCE_S = 0.15
+    # Allowed slack past the audio duration before flagging out-of-bounds.
+    DURATION_MARGIN_S = 0.5
+
+    def _validate_elements(
+        self,
+        elements: List[Dict[str, Any]],
+        audio_duration: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Return evident timecode errors as ``{severity, id, message}`` dicts.
+
+        An empty list means the timecodes pass. These are structural sanity
+        checks the highlighter relies on, not judgements about transcription
+        accuracy. ``severity`` is ``"error"`` for defects worth regenerating
+        and ``"warning"`` for minor inconsistencies kept for reporting only:
+
+        * zero-duration element (start == end) — no highlight slot      [error]
+        * element does not cover its own last word — that word can never
+          highlight, since the highlighter deactivates at element.end   [error]
+        * "stuck" window — element.end runs far past its last word,
+          freezing the highlight on the final word through a long gap   [error]
+        * element overlaps the previous element                         [error]
+        * two words sharing an identical (start, end) frame             [error]
+        * non-monotonic word starts within an element                   [error]
+        * element times beyond the audio duration                       [error]
+        * element start does not match its first word (sub-second
+          offsets are rounding noise; large ones shift the highlight) [warning]
+        """
+        issues: List[Dict[str, Any]] = []
+        prev_end: Optional[float] = None
+
+        def add(severity: str, eid: str, message: str) -> None:
+            issues.append({"severity": severity, "id": eid, "message": f"{eid}: {message}"})
+
+        for el in elements:
+            eid = str(el.get("id", "?"))
+            start = float(el.get("start", 0.0))
+            end = float(el.get("end", 0.0))
+            wts = el.get("word_timestamps", [])
+
+            if end <= start + 1e-6:
+                add("error", eid, f"zero-duration element ({start:.3f}=={end:.3f})")
+
+            if prev_end is not None and start < prev_end - 1e-6:
+                add(
+                    "error",
+                    eid,
+                    f"overlaps previous element (start {start:.3f} < previous end {prev_end:.3f})",
+                )
+
+            if wts:
+                w_start = float(wts[0]["start"])
+                w_end = float(wts[-1]["end"])
+                if abs(start - w_start) > self.BOUNDS_TOLERANCE_S:
+                    add(
+                        "warning",
+                        eid,
+                        f"element start {start:.3f} != first word start {w_start:.3f}",
+                    )
+                if w_end > end + self.BOUNDS_TOLERANCE_S:
+                    add(
+                        "error",
+                        eid,
+                        f"last word ends {w_end:.3f} after element end {end:.3f} (unhighlightable)",
+                    )
+                elif end - w_end > self.STUCK_WINDOW_GAP_S:
+                    add(
+                        "error",
+                        eid,
+                        f"stuck window — element ends {end:.3f}, "
+                        f"{end - w_end:.3f}s after its last word",
+                    )
+
+                seen_frames: set = set()
+                last_ws: Optional[float] = None
+                for w in wts:
+                    ws, we = float(w["start"]), float(w["end"])
+                    frame = (round(ws, 3), round(we, 3))
+                    if frame in seen_frames:
+                        add("error", eid, f"duplicate word time-frame {frame}")
+                    seen_frames.add(frame)
+                    if last_ws is not None and ws < last_ws - 1e-6:
+                        add("error", eid, f"non-monotonic word start {ws:.3f} < {last_ws:.3f}")
+                    last_ws = ws
+
+            if audio_duration > 0 and end > audio_duration + self.DURATION_MARGIN_S:
+                add(
+                    "error",
+                    eid,
+                    f"element end {end:.3f} exceeds audio duration {audio_duration:.3f}",
+                )
+
+            prev_end = end
+
+        return issues
+
+    def _generate_validated_payload(
+        self,
+        audio_path: Path,
+        page_id: str,
+        page_number: Optional[int],
+        language: str,
+        page_text_entries: List[Dict[str, str]],
+        strict_data_ids: bool,
+        audio_duration: float,
+        max_attempts: int,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Generate timecodes, validate them, and regenerate on evident errors.
+
+        Regeneration is triggered only by ``error``-severity issues (stuck
+        windows, zero-duration highlights, words outside their element, etc.);
+        ``warning``-severity issues (e.g. sub-second start offsets) are kept
+        and reported but do not justify another paid transcription. Each retry
+        perturbs the transcription temperature so Whisper produces slightly
+        different word timings; the attempt with the fewest errors (then fewest
+        total issues) is kept. Returns (best_payload, remaining_issues).
+        """
+        # Escalating temperatures: deterministic first, then progressively
+        # more varied to escape a degenerate alignment.
+        temperatures = [0.0, 0.2, 0.4, 0.6, 0.8]
+        attempts = max(1, max_attempts)
+
+        def error_count(issues: List[Dict[str, Any]]) -> int:
+            return sum(1 for i in issues if i["severity"] == "error")
+
+        best_payload: Optional[Dict[str, Any]] = None
+        best_issues: Optional[List[Dict[str, Any]]] = None
+
+        for attempt in range(attempts):
+            temperature = (
+                temperatures[attempt] if attempt < len(temperatures) else temperatures[-1]
+            )
+            payload = self._generate_timecode_payload(
+                audio_path=audio_path,
+                page_id=page_id,
+                page_number=page_number,
+                language=language,
+                page_text_entries=page_text_entries,
+                strict_data_ids=strict_data_ids,
+                temperature=temperature,
+            )
+            issues = self._validate_elements(payload.get("elements", []), audio_duration)
+
+            if best_issues is None or (error_count(issues), len(issues)) < (
+                error_count(best_issues),
+                len(best_issues),
+            ):
+                best_payload, best_issues = payload, issues
+
+            if error_count(issues) == 0:
+                if attempt > 0:
+                    self.logger.info(
+                        "%s: no error-level issues after %d attempt(s)", page_id, attempt + 1
+                    )
+                break
+
+            if attempt + 1 < attempts:
+                error_messages = [i["message"] for i in issues if i["severity"] == "error"]
+                self.logger.warning(
+                    "%s: %d error-level issue(s) on attempt %d (temp=%.1f); "
+                    "regenerating. First issues: %s",
+                    page_id,
+                    error_count(issues),
+                    attempt + 1,
+                    temperature,
+                    "; ".join(error_messages[:3]) or "—",
+                )
+
+        return best_payload or {"page_id": page_id, "elements": []}, best_issues or []
 
     def _load_text_entries_by_page(
         self,
@@ -461,12 +677,15 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         audio_path: Path,
         language: str,
         initial_prompt: str = "",
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         """Transcribe one audio file. Hybrid when self.text_model is set."""
         if self.text_model and self.text_model != self.model:
-            return self._hybrid_transcribe(audio_path, language, initial_prompt)
+            return self._hybrid_transcribe(
+                audio_path, language, initial_prompt, temperature=temperature
+            )
         return self._transcribe_single(
-            audio_path, language, initial_prompt, model=self.model
+            audio_path, language, initial_prompt, model=self.model, temperature=temperature
         )
 
     def _transcribe_single(
@@ -475,6 +694,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         language: str,
         initial_prompt: str,
         model: str,
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         transcription_language = self._transcription_language(language)
         # Only whisper models support verbose_json / word-level timestamps.
@@ -491,7 +711,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                         language=transcription_language,
                         response_format="verbose_json",
                         timestamp_granularities=["segment", "word"],
-                        temperature=0,
+                        temperature=temperature,
                         prompt=initial_prompt or None,
                     )
                 except Exception:
@@ -501,7 +721,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                         file=audio_file,
                         language=transcription_language,
                         response_format="verbose_json",
-                        temperature=0,
+                        temperature=temperature,
                         prompt=initial_prompt or None,
                     )
             else:
@@ -510,7 +730,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
                     file=audio_file,
                     language=transcription_language,
                     response_format="json",
-                    temperature=0,
+                    temperature=temperature,
                     prompt=initial_prompt or None,
                 )
 
@@ -548,6 +768,7 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         audio_path: Path,
         language: str,
         initial_prompt: str,
+        temperature: float = 0.0,
     ) -> Dict[str, Any]:
         """Combine a text model (e.g. gpt-4o-transcribe) for canonical word
         order with a timing model (e.g. whisper-1) for word-level timestamps.
@@ -569,10 +790,12 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         # it for canonical audio-order word sequence.  Whisper-1 still gets
         # the vocabulary prompt (it handles it as a hint, not a template).
         text_resp = self._transcribe_single(
-            audio_path, language, "", model=self.text_model  # type: ignore[arg-type]
+            audio_path, language, "", model=self.text_model,  # type: ignore[arg-type]
+            temperature=temperature,
         )
         timing_resp = self._transcribe_single(
-            audio_path, language, initial_prompt, model=self.model
+            audio_path, language, initial_prompt, model=self.model,
+            temperature=temperature,
         )
 
         gpt_text = str(text_resp.get("text") or "").strip()

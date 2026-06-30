@@ -95,3 +95,15 @@ class TimecodeGenerationConfig(PageProcessConfig):
             "0.6 s inter-element gap."
         ),
     )
+    max_regen_attempts: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "Maximum transcription attempts per audio file. After each attempt "
+            "the generated timecodes are validated; if evident errors remain "
+            "(zero-duration highlights, words outside their element window, "
+            "frozen 'stuck' windows, etc.) the file is regenerated with a "
+            "perturbed transcription temperature, keeping the cleanest attempt. "
+            "1 disables regeneration. Ignored for --char-timing (no transcription)."
+        ),
+    )

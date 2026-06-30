@@ -1055,8 +1055,19 @@ class AudioTimecodeGenerator(PageRangeProcessor):
         """Slide a window over the Whisper word list and return the position and
         normalized score of the best-matching window for the given entry tokens.
 
-        Multiplying ratio by len(entry_tokens) ensures a 10-word perfect match
-        outscores a 1-word coincidental match.
+        Scoring counts how many entry tokens are matched (in order) within the
+        window, so a 10-word match outscores a 1-word coincidental match.
+
+        Matched-token count is deliberately used instead of
+        ``SequenceMatcher.ratio()``: ratio divides by the window length, so a
+        window padded with trailing non-matching tokens scores *lower* than the
+        same match with less padding. For a repeated short phrase (e.g. two
+        "—¡¡Gané!!" lines) that biases the anchor toward whichever occurrence
+        sits nearest the end of the audio (least trailing context), rather than
+        the earliest occurrence. Counting matches is padding-independent, so
+        equal-quality occurrences tie and the strict ``>`` below keeps the
+        earliest — which, combined with the forward-constrained search for
+        repeated phrases, maps repeats to successive audio occurrences.
         """
         n = len(entry_tokens)
         if not n or not whisper_normalized:
@@ -1071,8 +1082,11 @@ class AudioTimecodeGenerator(PageRangeProcessor):
             window = whisper_normalized[start : start + n + window_extra]
             if not window:
                 break
-            raw = SequenceMatcher(None, entry_tokens, window).ratio()
-            score = raw * n
+            matched = sum(
+                block.size
+                for block in SequenceMatcher(None, entry_tokens, window).get_matching_blocks()
+            )
+            score = float(matched)
             # Head-match bonus: phrases almost always start at a phrase
             # boundary in the audio.  Reward windows whose first token equals
             # the entry's first reference token so ties and near-ties resolve

@@ -919,13 +919,33 @@ class AudioTimecodeGenerator(PageRangeProcessor):
 
         # Pass 1: raw anchors per entry (keyed by DOM index so we can weave
         # unmatched entries back in by their original position).
+        #
+        # Repeated phrases get a forward-constrained search: when the same
+        # normalized text appears more than once in DOM order (e.g. two
+        # identical "—¡¡Gané!!" lines on a story page), every occurrence would
+        # otherwise collapse onto the *first* audio match. Sorting strong
+        # entries by anchor would then bubble the later copy up next to the
+        # first one — ahead of the entries that genuinely fall between them in
+        # the audio — scrambling DOM order and cascading misalignment through
+        # the rest of the page. Anchoring the k-th occurrence after the
+        # (k-1)-th's position maps repeats to successive audio occurrences.
         raw: List[Tuple[int, int, float, Dict[str, str], List[str]]] = []
+        last_anchor_for_phrase: Dict[str, int] = {}
         for dom_idx, entry in enumerate(page_text_entries):
             tokens = [
                 self._normalize_token(t)
                 for t in self._split_reference_words(entry["text"])
             ]
-            pos, score = self._find_best_whisper_match(tokens, whisper_normalized)
+            phrase_key = " ".join(tokens)
+            search_start = 0
+            if phrase_key and phrase_key in last_anchor_for_phrase:
+                search_start = last_anchor_for_phrase[phrase_key] + 1
+            rel_pos, score = self._find_best_whisper_match(
+                tokens, whisper_normalized[search_start:]
+            )
+            pos = search_start + rel_pos
+            if phrase_key:
+                last_anchor_for_phrase[phrase_key] = pos
             raw.append((dom_idx, pos, score, entry, tokens))
 
         strong = [r for r in raw if r[2] >= match_threshold]

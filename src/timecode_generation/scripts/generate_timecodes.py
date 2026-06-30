@@ -116,6 +116,19 @@ def main() -> int:
             "Rule: 1–3 letters = 0.2 s, 4–7 = 0.4 s, 8+ = 0.6 s; 0.6 s gap between elements."
         ),
     )
+    parser.add_argument(
+        "--max-regen-attempts",
+        type=int,
+        default=2,
+        help=(
+            "Maximum transcription attempts per audio file (default: 2). After "
+            "each attempt the timecodes are validated for evident errors "
+            "(zero-duration highlights, words outside their element window, "
+            "frozen 'stuck' windows, etc.); on errors the file is regenerated "
+            "with a perturbed temperature and the cleanest attempt is kept. "
+            "Pass 1 to disable regeneration. Ignored with --char-timing."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -154,6 +167,7 @@ def main() -> int:
         dry_run=args.dry_run,
         strict_data_ids=not args.non_strict_data_ids,
         use_char_timing=args.char_timing,
+        max_regen_attempts=args.max_regen_attempts,
     )
 
     generator = AudioTimecodeGenerator(
@@ -173,6 +187,13 @@ def main() -> int:
     print(f"Strict data-id mode: {result.metadata.get('strict_data_ids', True)}")
     print(f"Generated files: {result.metadata.get('generated_files', 0)}")
     print(f"Failed files: {result.metadata.get('failed_files', 0)}")
+    print(f"Max regen attempts: {result.metadata.get('max_regen_attempts', 1)}")
+    print(
+        "Pages with remaining issues: "
+        f"{result.metadata.get('pages_with_issues', 0)} "
+        f"({result.metadata.get('total_errors', 0)} errors, "
+        f"{result.metadata.get('total_issues', 0) - result.metadata.get('total_errors', 0)} warnings)"
+    )
     print(f"Timecode output: {result.metadata.get('timecode_dir', 'N/A')}")
 
     if result.processed_pages:
@@ -184,6 +205,13 @@ def main() -> int:
 
     if args.dry_run:
         print("Dry run mode enabled. No files were written.")
+
+    if result.warnings:
+        print("\nValidation warnings (timecodes kept; review or lock if needed):")
+        for warning in result.warnings[:15]:
+            print(f"- {warning}")
+        if len(result.warnings) > 15:
+            print(f"... and {len(result.warnings) - 15} more")
 
     if result.errors:
         print("\nErrors:")
